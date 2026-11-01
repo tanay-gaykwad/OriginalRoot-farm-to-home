@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowRight, BadgeCheck, CircleCheck, ClipboardCheck, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
+import { ArrowRight, BadgeCheck, CircleCheck, ClipboardCheck, LockKeyhole, QrCode, RefreshCw, ShieldCheck } from "lucide-react";
+import { PassportOperator } from "./PhaseFour";
 
 type HarvestListing = {
   id: string;
@@ -19,7 +20,7 @@ export type PublishedOffer = {
 
 const money = (value: number) => `₹${new Intl.NumberFormat("en-IN").format(value)}`;
 
-export function PublishedHarvests({ listings, canOrder, onOrder }: { listings: PublishedOffer[]; canOrder: boolean; onOrder: (listing: PublishedOffer) => void }) {
+export function PublishedHarvests({ listings, canOrder, onOrder, onPassport }: { listings: PublishedOffer[]; canOrder: boolean; onOrder: (listing: PublishedOffer) => void; onPassport: (listing: PublishedOffer) => void }) {
   if (!listings.length) return null;
   return <section className="approved-harvests">
     <div className="section-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> Grower-approved offers</div><h2>Available <em>harvests</em></h2><p>Each offer has been reviewed and its price split is visible.</p></div></div>
@@ -30,6 +31,7 @@ export function PublishedHarvests({ listings, canOrder, onOrder }: { listings: P
       <div className="approved-grade">{listing.grade}</div>
       <div className="approved-price-lines"><span>Grower receives <b>{money(listing.grower_payout)}</b></span><span>Sorting & packing <b>{money(listing.packing_cost)}</b></span><span>OriginalRoot coordination <b>{money(listing.platform_fee)}</b></span><span>Route cost <b>{money(listing.route_cost)}</b></span><strong>Customer price <b>{money(listing.buyer_price)} / {listing.unit}</b></strong></div>
       <small className="offer-note">{listing.remaining_quantity} {listing.unit} unreserved · no online payment</small>
+      <button className="passport-link-button" onClick={() => onPassport(listing)}><QrCode size={14} /> View batch record</button>
       <button className="button button-dark approved-order-button" disabled={!canOrder || listing.remaining_quantity < 1} onClick={() => onOrder(listing)}>{canOrder ? "Request pickup" : "Ordering unavailable here"} <ArrowRight size={14} /></button>
     </article>)}</div>
   </section>;
@@ -160,7 +162,8 @@ export function OperatorSpace({ onShop }: { onShop: () => void }) {
       {connected && <><div className="operator-queue-heading"><div><span className="eyebrow">Offer control</span><h2>Pending harvests <small>{pending.length}</small></h2></div><span className="status-pill status-review"><ClipboardCheck size={12} /> Review before publishing</span></div>
         {pending.length === 0 ? <div className="empty-search operator-empty"><span>🌱</span><b>No offers are waiting</b><small>New grower submissions will appear here for review.</small></div> : <div className="operator-listings">{pending.map((listing) => <article className="panel operator-listing" key={listing.id}><div className="operator-listing-head"><div><span className="eyebrow">{listing.id} · {listing.community}</span><h3>{listing.crop}</h3><p>{listing.farm_name} · ready {listing.harvest_window.toLowerCase()}</p></div><span className="status-pill status-review">Pending review</span></div><div className="operator-request-grid"><span>Offered quantity <b>{listing.available_quantity} {listing.unit}</b></span><span>Grower's minimum <b>{money(listing.minimum_payout)} / {listing.unit}</b></span></div><form className="operator-approve-form" onSubmit={(event) => decide(listing, "approve", event)}><div className="operator-input-grid"><label>Approved quantity<input name="approved_quantity" type="number" min="1" max={listing.available_quantity} defaultValue={listing.available_quantity} required /></label><label>Verified grade<select name="grade" defaultValue="Grade A"><option>Grade A</option><option>Grade B</option><option>Mixed</option></select></label><label>Grower payout / unit<input name="grower_payout" type="number" min={listing.minimum_payout} defaultValue={listing.minimum_payout} required /></label><label>Packing / unit<input name="packing_cost" type="number" min="0" defaultValue="4" required /></label><label>Coordination / unit<input name="platform_fee" type="number" min="0" defaultValue="5" required /></label><label>Route / unit<input name="route_cost" type="number" min="0" defaultValue="8" required /></label></div><label className="operator-note">Review note<input name="note" maxLength={240} defaultValue="Terms confirmed with grower" /></label><p className="operator-price-rule">Customer price is calculated as grower payout + packing + coordination + route. The API rejects any payout below the grower's stated minimum.</p><button className="checkout-button" type="submit" disabled={busy}><span>Approve and publish offer</span><b>Publish <ArrowRight size={15} /></b></button></form><form className="operator-reject-form" onSubmit={(event) => decide(listing, "reject", event)}><label>Decline reason<input name="note" minLength={3} maxLength={240} placeholder="Explain what needs to change" required /></label><button type="submit" disabled={busy}>Decline offer</button></form></article>)}</div>}</>}
       {connected && <OperatorOrderQueue authKey={key} />}
-      <div className="operator-release-note"><CircleCheck size={16} /><span><b>Phase 3 boundary</b><small>Requests reserve approved quantity and store customer contact details in the local database. No payment or delivery service is connected.</small></span></div>
+      {connected && <PassportOperator authKey={key} />}
+      <div className="operator-release-note"><CircleCheck size={16} /><span><b>Phase 4 boundary</b><small>Passport checkpoints are append-only operator records. They improve traceability but do not independently verify the farm, crop, or evidence. No payment or delivery service is connected.</small></span></div>
     </div>
   </main>;
 }

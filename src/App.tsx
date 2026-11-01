@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import productCatalog from "./catalog.json";
 import { OperatorSpace, OrderRequestModal, OrderTrackingModal, PublishedHarvests, type PublishedOffer } from "./PhaseTwo";
+import { BatchPassportModal } from "./PhaseFour";
 
 type Product = {
   id: string;
@@ -55,7 +56,7 @@ type Product = {
 const products = productCatalog as Product[];
 
 type Cart = Record<string, number>;
-type ModalState = { type: "trace"; product: Product } | { type: "listing" } | { type: "demand" } | { type: "order"; listing: PublishedOffer } | { type: "track" } | null;
+type ModalState = { type: "trace"; product: Product } | { type: "listing" } | { type: "demand" } | { type: "order"; listing: PublishedOffer } | { type: "passport"; listing: PublishedOffer } | { type: "track" } | null;
 const money = (n: number) => `₹${new Intl.NumberFormat("en-IN").format(n)}`;
 
 function Logo({ compact = false }: { compact?: boolean }) {
@@ -100,7 +101,13 @@ function App() {
   const [orderRequestsAvailable, setOrderRequestsAvailable] = useState(false);
 
   useEffect(() => { localStorage.setItem("OriginalRoot-cart", JSON.stringify(cart)); }, [cart]);
-  useEffect(() => { fetch("/api/harvest-listings").then((response) => response.ok ? response.json() : null).then((result) => setPublishedOffers(result?.listings || [])).catch(() => setPublishedOffers([])); }, []);
+  useEffect(() => { fetch("/api/harvest-listings").then((response) => response.ok ? response.json() : null).then((result) => {
+    const listings: PublishedOffer[] = result?.listings || [];
+    setPublishedOffers(listings);
+    const sharedPassport = new URLSearchParams(window.location.search).get("passport");
+    const listing = listings.find((offer) => offer.id === sharedPassport);
+    if (listing) setModal({ type: "passport", listing });
+  }).catch(() => setPublishedOffers([])); }, []);
   useEffect(() => { fetch("/api/health").then((response) => response.ok ? response.json() : null).then((result) => setOrderRequestsAvailable(Boolean(result?.order_requests_enabled))).catch(() => setOrderRequestsAvailable(false)); }, []);
   useEffect(() => { if (!notice) return; const id = window.setTimeout(() => setNotice(""), 2600); return () => window.clearTimeout(id); }, [notice]);
 
@@ -227,7 +234,7 @@ function App() {
 
           <section className="harvest-section wrap" id="the-harvest">
             <div className="section-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> Fresh from the farms</div><h2>This week’s <em>harvest</em></h2><p>Illustrative seasonal listings for Mysuru and nearby homes.</p></div><button className="season-note" onClick={() => setNotice("Seasonal availability changes with each harvest.")}><span className="season-icon"><Sprout size={16} /></span><span><b>In season, right now</b><small>Available around Mysuru</small></span><ArrowRight size={15} /></button></div>
-            <PublishedHarvests listings={publishedOffers} canOrder={orderRequestsAvailable} onOrder={(listing) => setModal({ type: "order", listing })} />
+            <PublishedHarvests listings={publishedOffers} canOrder={orderRequestsAvailable} onOrder={(listing) => setModal({ type: "order", listing })} onPassport={(listing) => setModal({ type: "passport", listing })} />
             <div className="demand-banner"><div><span className="demand-banner-icon"><Sprout size={18} /></span><span><b>Help growers plan the next harvest</b><small>Share what your household would buy. No name, phone, payment, or commitment needed.</small></span></div><button className="button button-dark" onClick={() => { setDemandSaved(false); setDemandLocation(""); setModal({ type: "demand" }); }}>Add a demand signal <ArrowRight size={15} /></button></div>
         <div className="catalog-tools"><div className="category-tabs">{["Everything", "Vegetables", "Fruit", "Greens", "Pantry"].map((item) => <button key={item} className={category === item ? "tab-selected" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div><label className="search-box"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find something good..." /></label></div>
             <div className="product-grid">{visibleProducts.map((product) => <ProductCard key={product.id} product={product} quantity={cart[product.id] || 0} onAdd={() => add(product)} onTrace={() => setModal({ type: "trace", product })} />)}</div>
@@ -251,6 +258,7 @@ function App() {
       {modal?.type === "demand" && <div className="modal-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setModal(null); }}><section className="listing-modal"><button className="modal-close icon-button" onClick={() => setModal(null)} aria-label="Close"><X size={19} /></button><span className="eyebrow">Community harvest planning</span><h2>What would you buy?</h2><p>Your anonymous signal helps estimate local demand before a grower decides what to harvest. It is not an order or reservation.</p>{demandSaved ? <div className="saved-state"><CircleCheck size={24} /><b>Demand signal recorded</b><span>{demandLocation === "shared" ? "Shared with this OriginalRoot local-pilot workspace." : "Saved on this device only. This GitHub Pages site has no shared service connected."} No personal details were collected.</span><button className="button button-dark" onClick={() => setModal(null)}>Done</button></div> : <form className="listing-form" onSubmit={submitDemand}><label>Produce<select name="product_id" defaultValue={products[0].id}>{products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label><div className="form-two"><label>Community<select name="community" defaultValue="Mysuru"><option>Mysuru</option><option>Mandya</option><option>Srirangapatna</option></select></label><label>Household units<select name="quantity" defaultValue="1"><option value="1">1 unit</option><option value="2">2 units</option><option value="3">3 units</option></select></label></div><div className="form-note"><ShieldCheck size={15} /> Anonymous demand planning only. No contact details, money, or purchase promise.</div><button className="checkout-button" type="submit"><span>Share demand signal</span><b>Continue <ArrowRight size={15} /></b></button></form>}</section></div>}
 
       {modal?.type === "order" && <OrderRequestModal listing={modal.listing} onClose={() => setModal(null)} />}
+      {modal?.type === "passport" && <BatchPassportModal listing={modal.listing} onClose={() => setModal(null)} />}
       {modal?.type === "track" && <OrderTrackingModal onClose={() => setModal(null)} />}
 
       {notice && <div className="toast"><CircleCheck size={17} /><span>{notice}</span><button onClick={() => setNotice("")} aria-label="Dismiss"><X size={14} /></button></div>}

@@ -126,6 +126,17 @@ def connect_db() -> sqlite3.Connection:
             created_at TEXT NOT NULL
         )"""
     )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS harvest_passport_events (
+            id TEXT PRIMARY KEY,
+            listing_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            location TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            recorded_by TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
     return connection
 
 
@@ -199,6 +210,28 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                        FROM harvest_demand GROUP BY product_id, community ORDER BY product_id, community"""
                 ).fetchall()
             self._send_json(200, {"mode": "local-pilot", "signals": [dict(row) for row in rows]})
+            return
+        if path == "/api/operator/passports":
+            if not self._operator_authorized():
+                return
+            with closing(connect_db()) as connection:
+                rows = connection.execute("SELECT id, crop, farm_name, community, approved_quantity, unit, grade FROM harvest_listings WHERE status = 'published' ORDER BY created_at DESC").fetchall()
+                counts = {row["listing_id"]: row["count"] for row in connection.execute("SELECT listing_id, COUNT(*) AS count FROM harvest_passport_events GROUP BY listing_id").fetchall()}
+            self._send_json(200, {"listings": [{**dict(row), "event_count": counts.get(row["id"], 0)} for row in rows]})
+            return
+        if path.startswith("/api/harvest-listings/") and path.endswith("/passport"):
+            listing_id = path.removeprefix("/api/harvest-listings/").removesuffix("/passport").strip("/").upper()
+            if not re.fullmatch(r"VAV-[0-9A-F]{10}", listing_id):
+                self._send_json(404, {"detail": "Batch passport not found"})
+                return
+            with closing(connect_db()) as connection:
+                listing = connection.execute("SELECT * FROM harvest_listings WHERE id = ? AND status = 'published'", (listing_id,)).fetchone()
+                events = connection.execute("SELECT event_type, location, detail, recorded_by, created_at FROM harvest_passport_events WHERE listing_id = ? ORDER BY created_at, id", (listing_id,)).fetchall()
+            if listing is None:
+                self._send_json(404, {"detail": "Batch passport not found"})
+                return
+            passport = {key: listing[key] for key in ("id", "crop", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "reviewed_at")}
+            self._send_json(200, {"passport": passport, "events": [dict(event) for event in events], "record_note": "Timeline entries are operator-recorded. OriginalRoot does not independently verify a record or its supporting evidence."})
             return
         if path == "/api/operator/orders":
             if not self._operator_authorized():
@@ -377,6 +410,35 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                         self._send_json(503, {"detail": "Could not update the order. Please retry."})
                         return
                 self._send_json(200, {"reference": reference, "status": new_status, "updated_at": now})
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+            return
+        if request_path.startswith("/api/operator/harvest-listings/") and request_path.endswith("/passport-events"):
+            if not self._operator_authorized():
+                return
+            listing_id = request_path.removeprefix("/api/operator/harvest-listings/").removesuffix("/passport-events").strip("/").upper()
+            try:
+                payload = self._read_json()
+                event_type = payload.get("event_type")
+                location = payload.get("location", "")
+                detail = payload.get("detail")
+                if not re.fullmatch(r"VAV-[0-9A-F]{10}", listing_id):
+                    raise ValueError("Choose a valid published batch")
+                if event_type not in {"harvested", "weighed", "graded", "packed", "handed_off"}:
+                    raise ValueError("Choose a supported batch checkpoint")
+                if not isinstance(location, str) or len(location.strip()) > 100:
+                    raise ValueError("Location must be 100 characters or fewer")
+                if not isinstance(detail, str) or not 3 <= len(detail.strip()) <= 240:
+                    raise ValueError("Add a 3 to 240 character record note")
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                with closing(connect_db()) as connection:
+                    listing = connection.execute("SELECT id FROM harvest_listings WHERE id = ? AND status = 'published'", (listing_id,)).fetchone()
+                    if listing is None:
+                        self._send_json(404, {"detail": "Published batch not found"})
+                        return
+                    event_id = uuid.uuid4().hex
+                    connection.execute("INSERT INTO harvest_passport_events (id, listing_id, event_type, location, detail, recorded_by, created_at) VALUES (?, ?, ?, ?, ?, 'OriginalRoot operator', ?)", (event_id, listing_id, event_type, location.strip(), detail.strip(), now))
+                self._send_json(201, {"event": {"id": event_id, "listing_id": listing_id, "event_type": event_type, "location": location.strip(), "detail": detail.strip(), "recorded_by": "OriginalRoot operator", "created_at": now}})
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
             return

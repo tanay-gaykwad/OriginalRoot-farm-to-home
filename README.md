@@ -29,6 +29,8 @@ Phase 2 adds a grower offer → operator review → approved customer listing wo
 
 Phase 3 adds pickup order requests, atomic quantity reservations, operator status updates, and reference-based customer tracking. See the [Phase 3 order workflow](docs/PHASE_3.md).
 
+Phase 4 adds a public record for each approved batch and an operator console for appending harvest, weighing, grading, packing, and handoff checkpoints. Records are link-shareable and stored in SQLite. Operator-entered notes improve traceability but are not independent verification. See the [Phase 4 batch record workflow](docs/PHASE_4.md).
+
 ## Run locally
 
 Run these commands from the project root:
@@ -82,6 +84,9 @@ Open `http://127.0.0.1:8080`. Enter the same operator key shown in `.env` in the
 - `GET /api/harvest-listings` returns approved offers only.
 - `GET /api/harvest-listings?scope=review` returns the pending queue with `Authorization: Bearer <operator-key>`.
 - `POST /api/operator/harvest-listings/{id}/decision` approves or declines a pending offer. Approval checks that grower payout is at least the stated floor and calculates the customer price from the four visible price components.
+- `GET /api/harvest-listings/{id}/passport` returns the public batch record for an approved offer, including its price split and recorded checkpoints.
+- `GET /api/operator/passports` lists published batches for the operator console and requires the operator key.
+- `POST /api/operator/harvest-listings/{id}/passport-events` appends a harvest, weighing, grading, packing, or handoff checkpoint and requires the operator key.
 - `POST /api/orders` requests pickup of a published offer. Quantity reservation is atomic; a local operator key must be configured. This stores the customer's name and mobile number in the local SQLite database.
 - `GET /api/orders/{reference}` returns status and pickup notes without customer contact details.
 - `GET /api/operator/orders` and `POST /api/operator/orders/{reference}/status` expose and update the pickup queue with the operator key.
@@ -109,6 +114,7 @@ Replace sample data with field-verified records; add authenticated farmer, custo
 - Python standard-library HTTP server for the local order API
 - SQLite for local sample-order persistence
 - Operator-key protected review and approval for harvest listings
+- SQLite-backed batch passports with operator-recorded handling checkpoints
 - Docker Compose for a one-command local package
 
 ## License
