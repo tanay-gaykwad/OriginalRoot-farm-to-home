@@ -64,10 +64,13 @@ Then open `http://127.0.0.1:8080`.
 ### Run with Docker
 
 ```powershell
-docker compose up --build
+Copy-Item .env.example .env
+# Edit .env and replace the placeholder with a long random operator key.
+docker compose up --build -d
+docker compose ps
 ```
 
-Copy `.env.example` to `.env`, replace the placeholder with a long random key, then run Docker Compose. Open `http://127.0.0.1:8080`. Sample order records and harvest offers are stored in a Docker volume. The published container port is bound to loopback for local use.
+Open `http://127.0.0.1:8080`. Enter the same operator key shown in `.env` in the Operations page. Sample order records and harvest offers are stored in the `OriginalRoot-data` Docker volume. The app is available only on this computer; the published container port is bound to loopback. Stop it with `docker compose down`; use `docker compose down -v` only if you intend to erase its database volume.
 
 ## Local API
 

@@ -10,6 +10,16 @@ services:
       OriginalRoot_OPERATOR_TOKEN: ${OriginalRoot_OPERATOR_TOKEN:-}
     volumes:
       - OriginalRoot-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
 volumes:
