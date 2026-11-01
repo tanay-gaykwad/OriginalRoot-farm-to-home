@@ -37,6 +37,8 @@ Phase 6 replaces the shared operator key for routine access with named operator 
 
 Phase 7 adds local delivery requests, private delivery addresses, a customer-facing order history, and a one-time handoff code verified by an operator before delivery completion. Pickup remains available. See the [Phase 7 local delivery workflow](docs/PHASE_7.md).
 
+Phase 8 adds customer order complaints, grower grievances, private ticket lookup, operator investigation and resolution timelines, and an attributable audit record. Refund and replacement choices are requests for review only; no money or replacement is processed. Support workflows require the local Docker/API deployment and are not active on the static GitHub Pages preview. See the [Phase 8 customer and grower support workflow](docs/PHASE_8.md).
+
 ## Run locally
 
 Run these commands from the project root:

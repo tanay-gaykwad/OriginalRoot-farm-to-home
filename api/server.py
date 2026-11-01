@@ -28,6 +28,9 @@ MAX_BODY_BYTES = 16_384
 OPERATOR_TOKEN = os.environ.get("OriginalRoot_OPERATOR_TOKEN", "")
 COMMUNITIES = {"Mysuru", "Mandya", "Srirangapatna"}
 UNITS = {"kg", "500 g", "250 g", "bunch", "dozen"}
+SUPPORT_CATEGORIES = {"quality", "missing_or_wrong", "delivery", "damaged", "other"}
+SUPPORT_RESOLUTIONS = {"replacement_review", "refund_review", "contact_me"}
+SUPPORT_STATUSES = {"open", "investigating", "awaiting_customer", "resolved", "closed"}
 
 
 def load_catalog() -> list[dict]:
@@ -188,6 +191,36 @@ def connect_db() -> sqlite3.Connection:
             from_status TEXT,
             to_status TEXT NOT NULL,
             note TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS support_tickets (
+            id TEXT PRIMARY KEY,
+            requester_type TEXT NOT NULL CHECK (requester_type IN ('customer', 'grower')),
+            grower_id TEXT,
+            order_reference TEXT,
+            listing_id TEXT,
+            category TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            message TEXT NOT NULL,
+            requested_resolution TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            resolution_note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute("CREATE INDEX IF NOT EXISTS support_tickets_grower_idx ON support_tickets(grower_id, created_at DESC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS support_tickets_order_idx ON support_tickets(order_reference, created_at DESC)")
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS support_ticket_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id TEXT NOT NULL,
+            from_status TEXT,
+            to_status TEXT NOT NULL,
+            note TEXT NOT NULL,
+            actor TEXT NOT NULL,
             created_at TEXT NOT NULL
         )"""
     )
@@ -358,6 +391,29 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 rows = connection.execute("SELECT id, crop, community, available_quantity, unit, harvest_window, minimum_payout, status, approved_quantity, grade, grower_payout, buyer_price, decision_note, created_at, reviewed_at FROM harvest_listings WHERE grower_id = ? ORDER BY created_at DESC", (grower["id"],)).fetchall()
             self._send_json(200, {"listings": [dict(row) for row in rows]})
             return
+        if path == "/api/grower/support-tickets":
+            grower = self._grower_session()
+            if grower is None:
+                self._send_json(401, {"detail": "Sign in to view your support requests"})
+                return
+            with closing(connect_db()) as connection:
+                rows = connection.execute(
+                    """SELECT t.*, l.crop AS linked_crop FROM support_tickets t
+                       LEFT JOIN harvest_listings l ON l.id = t.listing_id
+                       WHERE t.requester_type = 'grower' AND t.grower_id = ? ORDER BY t.created_at DESC""",
+                    (grower["id"],),
+                ).fetchall()
+                events = connection.execute(
+                    """SELECT e.* FROM support_ticket_events e
+                       JOIN support_tickets t ON t.id = e.ticket_id
+                       WHERE t.requester_type = 'grower' AND t.grower_id = ? ORDER BY e.id""",
+                    (grower["id"],),
+                ).fetchall()
+            event_map: dict[str, list[dict]] = {}
+            for event in events:
+                event_map.setdefault(event["ticket_id"], []).append({"from_status": event["from_status"], "to_status": event["to_status"], "note": event["note"], "actor": event["actor"], "created_at": event["created_at"]})
+            self._send_json(200, {"tickets": [{**dict(row), "events": event_map.get(row["id"], [])} for row in rows]})
+            return
         if path == "/api/operator/setup-status":
             with closing(connect_db()) as connection:
                 has_operator = connection.execute("SELECT 1 FROM operator_users LIMIT 1").fetchone() is not None
@@ -384,6 +440,22 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             with closing(connect_db()) as connection:
                 rows = connection.execute("SELECT operator_name, action, entity_type, entity_id, detail, created_at FROM operator_audit ORDER BY id DESC LIMIT 100").fetchall()
             self._send_json(200, {"events": [dict(row) for row in rows]})
+            return
+        if path == "/api/operator/support-tickets":
+            if not self._operator_authorized():
+                return
+            with closing(connect_db()) as connection:
+                rows = connection.execute(
+                    """SELECT t.*, o.customer_name, o.customer_phone, o.crop AS order_crop, g.farm_name
+                       FROM support_tickets t LEFT JOIN harvest_orders o ON o.reference = t.order_reference
+                       LEFT JOIN growers g ON g.id = t.grower_id
+                       ORDER BY CASE WHEN t.status IN ('resolved', 'closed') THEN 1 ELSE 0 END, t.created_at ASC"""
+                ).fetchall()
+                events = connection.execute("SELECT * FROM support_ticket_events ORDER BY id").fetchall()
+            event_map: dict[str, list[dict]] = {}
+            for event in events:
+                event_map.setdefault(event["ticket_id"], []).append({"from_status": event["from_status"], "to_status": event["to_status"], "note": event["note"], "actor": event["actor"], "created_at": event["created_at"]})
+            self._send_json(200, {"tickets": [{**dict(row), "events": event_map.get(row["id"], [])} for row in rows]})
             return
         if path == "/api/products":
             self._send_json(200, {"mode": "sample-data", "products": CATALOG})
@@ -694,6 +766,111 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 pass
             self._send_json(200, {"status": "signed_out"}, {"Set-Cookie": self._session_cookie("", clear=True)})
             return
+        if request_path == "/api/support/customer-tickets":
+            try:
+                payload = self._read_json()
+                order_reference = payload.get("order_reference")
+                customer_phone = payload.get("customer_phone")
+                category = payload.get("category")
+                subject = payload.get("subject")
+                message = payload.get("message")
+                requested_resolution = payload.get("requested_resolution")
+                if not isinstance(order_reference, str) or not re.fullmatch(r"VAV-[0-9A-F]{16}", order_reference.upper()):
+                    raise ValueError("Enter the order reference shown at checkout")
+                if not isinstance(customer_phone, str) or not re.fullmatch(r"[6-9][0-9]{9}", customer_phone):
+                    raise ValueError("Enter the 10-digit mobile number used for this order")
+                if not isinstance(category, str) or category not in SUPPORT_CATEGORIES:
+                    raise ValueError("Choose an issue category")
+                if not isinstance(subject, str) or not 4 <= len(subject.strip()) <= 120:
+                    raise ValueError("Summary must be 4 to 120 characters")
+                if not isinstance(message, str) or not 12 <= len(message.strip()) <= 1500:
+                    raise ValueError("Describe the issue in 12 to 1500 characters")
+                if not isinstance(requested_resolution, str) or requested_resolution not in SUPPORT_RESOLUTIONS:
+                    raise ValueError("Choose a preferred resolution")
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            order_reference = order_reference.upper()
+            with closing(connect_db()) as connection:
+                order = connection.execute("SELECT reference, customer_phone, listing_id FROM harvest_orders WHERE reference = ?", (order_reference,)).fetchone()
+                if order is None or not hmac.compare_digest(order["customer_phone"].encode("utf-8"), customer_phone.encode("utf-8")):
+                    self._send_json(404, {"detail": "We could not match that order and mobile number"})
+                    return
+                ticket_id = f"SUP-{uuid.uuid4().hex[:16].upper()}"
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                with connection:
+                    connection.execute(
+                        """INSERT INTO support_tickets (id, requester_type, order_reference, listing_id, category, subject, message, requested_resolution, status, created_at, updated_at)
+                           VALUES (?, 'customer', ?, ?, ?, ?, ?, ?, 'open', ?, ?)""",
+                        (ticket_id, order_reference, order["listing_id"], category, subject.strip(), message.strip(), requested_resolution, now, now),
+                    )
+                    connection.execute("INSERT INTO support_ticket_events (ticket_id, from_status, to_status, note, actor, created_at) VALUES (?, NULL, 'open', 'Issue submitted for review', 'Customer', ?)", (ticket_id, now))
+            self._send_json(201, {"ticket_id": ticket_id, "status": "open", "message": "Your support request is recorded. Keep the ticket ID to check for updates."})
+            return
+        if request_path == "/api/support/customer-ticket-status":
+            try:
+                payload = self._read_json()
+                ticket_id = payload.get("ticket_id")
+                customer_phone = payload.get("customer_phone")
+                if not isinstance(ticket_id, str) or not re.fullmatch(r"SUP-[0-9A-F]{16}", ticket_id.upper()):
+                    raise ValueError("Enter a valid support ticket ID")
+                if not isinstance(customer_phone, str) or not re.fullmatch(r"[6-9][0-9]{9}", customer_phone):
+                    raise ValueError("Enter the 10-digit mobile number used for the order")
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            ticket_id = ticket_id.upper()
+            with closing(connect_db()) as connection:
+                ticket = connection.execute("SELECT t.* FROM support_tickets t JOIN harvest_orders o ON o.reference = t.order_reference WHERE t.id = ? AND t.requester_type = 'customer'", (ticket_id,)).fetchone()
+                if ticket is None:
+                    self._send_json(404, {"detail": "Support ticket not found"})
+                    return
+                order = connection.execute("SELECT customer_phone FROM harvest_orders WHERE reference = ?", (ticket["order_reference"],)).fetchone()
+                if order is None or not hmac.compare_digest(order["customer_phone"].encode("utf-8"), customer_phone.encode("utf-8")):
+                    self._send_json(404, {"detail": "Support ticket not found"})
+                    return
+                events = connection.execute("SELECT from_status, to_status, note, actor, created_at FROM support_ticket_events WHERE ticket_id = ? ORDER BY id", (ticket_id,)).fetchall()
+            self._send_json(200, {"ticket": {key: ticket[key] for key in ("id", "order_reference", "category", "subject", "message", "requested_resolution", "status", "resolution_note", "created_at", "updated_at")}, "events": [dict(event) for event in events]})
+            return
+        if request_path == "/api/grower/support-tickets":
+            grower = self._grower_session()
+            if grower is None:
+                self._send_json(401, {"detail": "Sign in before contacting OriginalRoot support"})
+                return
+            try:
+                payload = self._read_json()
+                category = payload.get("category")
+                subject = payload.get("subject")
+                message = payload.get("message")
+                listing_id = payload.get("listing_id", "")
+                if not isinstance(category, str) or category not in {"offer_review", "quality", "payout_question", "other"}:
+                    raise ValueError("Choose a grievance category")
+                if not isinstance(subject, str) or not 4 <= len(subject.strip()) <= 120:
+                    raise ValueError("Summary must be 4 to 120 characters")
+                if not isinstance(message, str) or not 12 <= len(message.strip()) <= 1500:
+                    raise ValueError("Describe your concern in 12 to 1500 characters")
+                if not isinstance(listing_id, str) or (listing_id and not re.fullmatch(r"VAV-[0-9A-F]{10}", listing_id)):
+                    raise ValueError("Choose one of your own valid harvest offers")
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            with closing(connect_db()) as connection:
+                if listing_id:
+                    listing = connection.execute("SELECT id FROM harvest_listings WHERE id = ? AND grower_id = ?", (listing_id, grower["id"])).fetchone()
+                    if listing is None:
+                        self._send_json(404, {"detail": "That harvest offer is not part of your account"})
+                        return
+                ticket_id = f"SUP-{uuid.uuid4().hex[:16].upper()}"
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                with connection:
+                    connection.execute(
+                        """INSERT INTO support_tickets (id, requester_type, grower_id, listing_id, category, subject, message, requested_resolution, status, created_at, updated_at)
+                           VALUES (?, 'grower', ?, ?, ?, ?, ?, 'operator_review', 'open', ?, ?)""",
+                        (ticket_id, grower["id"], listing_id or None, category, subject.strip(), message.strip(), now, now),
+                    )
+                    connection.execute("INSERT INTO support_ticket_events (ticket_id, from_status, to_status, note, actor, created_at) VALUES (?, NULL, 'open', 'Grievance submitted for review', ?, ?)", (ticket_id, grower["farm_name"], now))
+            self._send_json(201, {"ticket_id": ticket_id, "status": "open", "message": "Your grievance is recorded and linked to your grower account."})
+            return
         if request_path == "/api/orders":
             if not self._operator_account_exists():
                 self._send_json(503, {"detail": "Order requests are disabled until the first operator account is created"})
@@ -810,6 +987,53 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                         return
                 self._record_operator_audit("order_status_changed", "order", reference, f"Status set to {new_status}")
                 self._send_json(200, {"reference": reference, "status": new_status, "updated_at": now})
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+            return
+        if request_path.startswith("/api/operator/support-tickets/") and request_path.endswith("/status"):
+            if not self._operator_authorized():
+                return
+            ticket_id = request_path.removeprefix("/api/operator/support-tickets/").removesuffix("/status").strip("/").upper()
+            try:
+                payload = self._read_json()
+                new_status = payload.get("status")
+                note = payload.get("note")
+                if not re.fullmatch(r"SUP-[0-9A-F]{16}", ticket_id):
+                    raise ValueError("Choose a valid support ticket")
+                if not isinstance(new_status, str) or new_status not in SUPPORT_STATUSES:
+                    raise ValueError("Choose a valid support status")
+                if not isinstance(note, str) or not 3 <= len(note.strip()) <= 500:
+                    raise ValueError("Add a customer-facing update of 3 to 500 characters")
+                allowed = {
+                    "open": {"investigating", "awaiting_customer", "resolved", "closed"},
+                    "investigating": {"awaiting_customer", "resolved", "closed"},
+                    "awaiting_customer": {"investigating", "resolved", "closed"},
+                    "resolved": {"investigating", "closed"},
+                    "closed": {"investigating"},
+                }
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                with closing(connect_db()) as connection:
+                    try:
+                        connection.execute("BEGIN IMMEDIATE")
+                        ticket = connection.execute("SELECT * FROM support_tickets WHERE id = ?", (ticket_id,)).fetchone()
+                        if ticket is None:
+                            connection.rollback()
+                            self._send_json(404, {"detail": "Support ticket not found"})
+                            return
+                        if new_status not in allowed.get(ticket["status"], set()):
+                            connection.rollback()
+                            self._send_json(409, {"detail": f"Cannot move a ticket from {ticket['status']} to {new_status}"})
+                            return
+                        resolution_note = note.strip() if new_status == "resolved" else ticket["resolution_note"]
+                        connection.execute("UPDATE support_tickets SET status = ?, resolution_note = ?, updated_at = ? WHERE id = ?", (new_status, resolution_note, now, ticket_id))
+                        connection.execute("INSERT INTO support_ticket_events (ticket_id, from_status, to_status, note, actor, created_at) VALUES (?, ?, ?, ?, ?, ?)", (ticket_id, ticket["status"], new_status, note.strip(), self.current_operator["full_name"], now))
+                        connection.commit()
+                    except sqlite3.Error:
+                        connection.rollback()
+                        self._send_json(503, {"detail": "Could not update the support request. Please retry."})
+                        return
+                self._record_operator_audit("support_ticket_updated", "support_ticket", ticket_id, f"Set support ticket status to {new_status}")
+                self._send_json(200, {"ticket_id": ticket_id, "status": new_status, "updated_at": now})
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
             return
