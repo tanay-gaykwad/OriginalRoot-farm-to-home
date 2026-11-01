@@ -7,9 +7,11 @@ services:
       OriginalRoot_HOST: 0.0.0.0
       OriginalRoot_PORT: 8080
       OriginalRoot_DB_PATH: /data/OriginalRoot.sqlite3
+      OriginalRoot_OPERATOR_TOKEN: ${OriginalRoot_OPERATOR_TOKEN:-}
     volumes:
       - OriginalRoot-data:/data
     restart: unless-stopped
 
 volumes:
   OriginalRoot-data:
+

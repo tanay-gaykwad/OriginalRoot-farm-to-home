@@ -23,6 +23,7 @@ Growers often make harvest and selling decisions with weak visibility into house
 - Anonymous demand-signal form. A local API stores signals in SQLite and exposes only totals grouped by crop and community. No household-level signal history is returned by the aggregate endpoint.
 - Without the local API, the static GitHub Pages build saves a signal in that browser only; it is not shared with growers or other visitors.
 - Illustrative catalog and grower figures are marked as such. The interface does not claim that these farms are verified or that produce can be bought or delivered.
+- Phase 2 adds an offer review queue and an approved-offer listing flow. See [Phase 2](PHASE_2.md).
 
 ## Release gates before taking real orders
 

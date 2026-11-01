@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hmac
 import mimetypes
 import os
 import sqlite3
@@ -20,6 +21,9 @@ STATIC_PATH = ROOT / "dist"
 DATA_PATH = Path(os.environ.get("OriginalRoot_DB_PATH", ROOT / ".data" / "OriginalRoot.sqlite3"))
 ROUTE_FEE = 24
 MAX_BODY_BYTES = 16_384
+OPERATOR_TOKEN = os.environ.get("OriginalRoot_OPERATOR_TOKEN", "")
+COMMUNITIES = {"Mysuru", "Mandya", "Srirangapatna"}
+UNITS = {"kg", "500 g", "250 g", "bunch", "dozen"}
 
 
 def load_catalog() -> list[dict]:
@@ -67,6 +71,29 @@ def connect_db() -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS harvest_listings (
+            id TEXT PRIMARY KEY,
+            crop TEXT NOT NULL,
+            farm_name TEXT NOT NULL,
+            community TEXT NOT NULL,
+            available_quantity INTEGER NOT NULL,
+            unit TEXT NOT NULL,
+            harvest_window TEXT NOT NULL,
+            minimum_payout INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            approved_quantity INTEGER,
+            grade TEXT,
+            grower_payout INTEGER,
+            packing_cost INTEGER,
+            platform_fee INTEGER,
+            route_cost INTEGER,
+            buyer_price INTEGER,
+            decision_note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            reviewed_at TEXT
+        )"""
+    )
     return connection
 
 
@@ -75,7 +102,7 @@ def json_bytes(value: object) -> bytes:
 
 
 class OriginalRootHandler(BaseHTTPRequestHandler):
-    server_version = "OriginalRootDemo/0.1"
+    server_version = "OriginalRootLocal/0.2"
 
     def _headers(self, status: int, content_type: str = "application/json; charset=utf-8") -> None:
         self.send_response(status)
@@ -110,10 +137,25 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             raise ValueError("Request body must be a JSON object")
         return payload
 
+    def _operator_authorized(self) -> bool:
+        if not OPERATOR_TOKEN:
+            self._send_json(503, {"detail": "Operator access is not configured on this server"})
+            return False
+        supplied = self.headers.get("Authorization", "")
+        expected = f"Bearer {OPERATOR_TOKEN}"
+        if not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
+            self._send_json(401, {"detail": "Operator key is missing or invalid"})
+            return False
+        return True
+
+    @staticmethod
+    def _listing_payload(row: sqlite3.Row) -> dict:
+        return {key: row[key] for key in row.keys()}
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = urlsplit(self.path).path
         if path == "/api/health":
-            self._send_json(200, {"status": "ok", "mode": "local-demo", "payments_enabled": False})
+            self._send_json(200, {"status": "ok", "mode": "local-pilot", "operator_review_enabled": bool(OPERATOR_TOKEN), "payments_enabled": False})
             return
         if path == "/api/products":
             self._send_json(200, {"mode": "sample-data", "products": CATALOG})
@@ -125,6 +167,20 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                        FROM harvest_demand GROUP BY product_id, community ORDER BY product_id, community"""
                 ).fetchall()
             self._send_json(200, {"mode": "local-pilot", "signals": [dict(row) for row in rows]})
+            return
+        if path == "/api/harvest-listings":
+            params = dict(part.split("=", 1) for part in urlsplit(self.path).query.split("&") if "=" in part)
+            if params.get("scope") == "review":
+                if not self._operator_authorized():
+                    return
+                query = "SELECT * FROM harvest_listings WHERE status = 'pending' ORDER BY created_at"
+            else:
+                query = "SELECT * FROM harvest_listings WHERE status = 'published' ORDER BY created_at DESC"
+            with closing(connect_db()) as connection:
+                rows = connection.execute(query).fetchall()
+            public_keys = ("id", "crop", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "reviewed_at")
+            payloads = [({key: row[key] for key in public_keys} if params.get("scope") != "review" else self._listing_payload(row)) for row in rows]
+            self._send_json(200, {"listings": payloads})
             return
         if path.startswith("/api/demo/orders/"):
             reference = path.removeprefix("/api/demo/orders/").upper()
@@ -146,6 +202,100 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         self._serve_static(path)
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        request_path = urlsplit(self.path).path
+        if request_path == "/api/harvest-listings":
+            try:
+                payload = self._read_json()
+                crop = payload.get("crop")
+                farm_name = payload.get("farm_name")
+                community = payload.get("community")
+                quantity = payload.get("available_quantity")
+                unit = payload.get("unit")
+                harvest_window = payload.get("harvest_window")
+                minimum_payout = payload.get("minimum_payout")
+                if not isinstance(crop, str) or not 2 <= len(crop.strip()) <= 60:
+                    raise ValueError("Crop name must be 2 to 60 characters")
+                if not isinstance(farm_name, str) or not 2 <= len(farm_name.strip()) <= 80:
+                    raise ValueError("Farm or collective name must be 2 to 80 characters")
+                if not isinstance(community, str) or community not in COMMUNITIES:
+                    raise ValueError("Choose a supported pilot community")
+                if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 100_000:
+                    raise ValueError("Available quantity must be between 1 and 100000")
+                if not isinstance(unit, str) or unit not in UNITS:
+                    raise ValueError("Choose a supported selling unit")
+                if not isinstance(harvest_window, str) or harvest_window not in {"Within 3 days", "Within 1 week", "Already harvested"}:
+                    raise ValueError("Choose a harvest window")
+                if isinstance(minimum_payout, bool) or not isinstance(minimum_payout, int) or not 1 <= minimum_payout <= 1_000_000:
+                    raise ValueError("Minimum payout must be a positive rupee amount per unit")
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            listing_id = f"VAV-{uuid.uuid4().hex[:10].upper()}"
+            with closing(connect_db()) as connection, connection:
+                connection.execute(
+                    """INSERT INTO harvest_listings
+                       (id, crop, farm_name, community, available_quantity, unit, harvest_window, minimum_payout, status, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                    (listing_id, crop.strip(), farm_name.strip(), community, quantity, unit, harvest_window, minimum_payout, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+                )
+                row = connection.execute("SELECT * FROM harvest_listings WHERE id = ?", (listing_id,)).fetchone()
+            self._send_json(201, {"listing": self._listing_payload(row), "message": "Offer submitted for review. It is not public until the grower-approved terms are confirmed."})
+            return
+        if request_path.startswith("/api/operator/harvest-listings/") and request_path.endswith("/decision"):
+            if not self._operator_authorized():
+                return
+            listing_id = request_path.removeprefix("/api/operator/harvest-listings/").removesuffix("/decision").strip("/")
+            try:
+                payload = self._read_json()
+                decision = payload.get("decision")
+                note = payload.get("note", "")
+                if not isinstance(decision, str) or decision not in {"approve", "reject"}:
+                    raise ValueError("Choose approve or reject")
+                if not isinstance(note, str) or len(note) > 240:
+                    raise ValueError("Review note must be 240 characters or fewer")
+                with closing(connect_db()) as connection:
+                    existing = connection.execute("SELECT * FROM harvest_listings WHERE id = ?", (listing_id,)).fetchone()
+                if existing is None or existing["status"] != "pending":
+                    self._send_json(404, {"detail": "Pending harvest offer not found"})
+                    return
+                if decision == "approve":
+                    quantity = payload.get("approved_quantity")
+                    grade = payload.get("grade")
+                    grower_payout = payload.get("grower_payout")
+                    packing_cost = payload.get("packing_cost")
+                    platform_fee = payload.get("platform_fee")
+                    route_cost = payload.get("route_cost")
+                    values = [quantity, grower_payout, packing_cost, platform_fee, route_cost]
+                    if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+                        raise ValueError("Quantity and all price components must be whole rupee/integer amounts")
+                    if not 1 <= quantity <= existing["available_quantity"]:
+                        raise ValueError("Approved quantity must be within the grower's offered quantity")
+                    if not isinstance(grade, str) or grade not in {"Grade A", "Grade B", "Mixed"}:
+                        raise ValueError("Choose a supported grade")
+                    if not existing["minimum_payout"] <= grower_payout <= 1_000_000:
+                        raise ValueError("Grower payout must meet the submitted minimum and stay at or below ₹1,000,000 per unit")
+                    if any(value < 0 or value > 1_000_000 for value in [packing_cost, platform_fee, route_cost]):
+                        raise ValueError("Cost components must be between ₹0 and ₹1,000,000 per unit")
+                    buyer_price = grower_payout + packing_cost + platform_fee + route_cost
+                    status = "published"
+                else:
+                    if len(note.strip()) < 3:
+                        raise ValueError("Add a short reason when declining an offer")
+                    quantity = grade = grower_payout = packing_cost = platform_fee = route_cost = buyer_price = None
+                    status = "rejected"
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            reviewed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            with closing(connect_db()) as connection, connection:
+                connection.execute(
+                    """UPDATE harvest_listings SET status=?, approved_quantity=?, grade=?, grower_payout=?, packing_cost=?,
+                       platform_fee=?, route_cost=?, buyer_price=?, decision_note=?, reviewed_at=? WHERE id=? AND status='pending'""",
+                    (status, quantity, grade, grower_payout, packing_cost, platform_fee, route_cost, buyer_price, note.strip(), reviewed_at, listing_id),
+                )
+                row = connection.execute("SELECT * FROM harvest_listings WHERE id = ?", (listing_id,)).fetchone()
+            self._send_json(200, {"listing": self._listing_payload(row)})
+            return
         if urlsplit(self.path).path == "/api/harvest-demand":
             try:
                 payload = self._read_json()

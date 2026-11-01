@@ -18,10 +18,14 @@ The preview uses fictional farms, listings, harvest records, prices, and grower 
 - Switch to the grower workspace and save a harvest-listing draft in the browser.
 - Run the combined static site and local order API with Docker Compose.
 - Submit an anonymous crop-demand signal for a nearby community. With the local API, only aggregate counts by crop and community are exposed; on GitHub Pages the signal stays in the visitor's browser.
+- Submit a grower harvest offer with an explicit minimum payout, review it in the operator console, and publish only after entering the confirmed grade and full price split.
+- Show operator-approved offers on the customer harvest board when the frontend is connected to the local API.
 
 ## Phase 1 product direction
 
 OriginalRoot starts as a demand-led harvest network for one local corridor. Its first differentiator is helping growers plan from neighborhood demand while keeping growers in control of the minimum net payout and offer terms. Each batch should carry clear origin, grading, handling, and price-split records. Read the [Phase 1 product and operating plan](docs/PHASE_1.md) for scope, release gates, and success measures.
+
+Phase 2 adds a grower offer → operator review → approved customer listing workflow. See the [Phase 2 operating workflow](docs/PHASE_2.md) for setup, review rules, and deployment boundaries.
 
 ## Run locally
 
@@ -34,6 +38,7 @@ pnpm install --frozen-lockfile
 Start the local API in one terminal:
 
 ```powershell
+$env:OriginalRoot_OPERATOR_TOKEN = "replace-with-a-long-random-secret"
 python api/server.py
 ```
 
@@ -43,7 +48,7 @@ Start the web app in another terminal:
 pnpm dev
 ```
 
-Open `http://localhost:5173`. Vite forwards `/api` requests to the local API on port 8080.
+Open `http://localhost:5173`. Vite forwards `/api` requests to the local API on port 8080. Use the Operations page to enter the same key and review offers. The key is kept in page memory and sent only to the same-origin local API.
 
 ### Build and serve locally
 
@@ -60,18 +65,22 @@ Then open `http://127.0.0.1:8080`.
 docker compose up --build
 ```
 
-Open `http://127.0.0.1:8080`. Sample order records are stored in a Docker volume. The published container port is bound to loopback for local use.
+Copy `.env.example` to `.env`, replace the placeholder with a long random key, then run Docker Compose. Open `http://127.0.0.1:8080`. Sample order records and harvest offers are stored in a Docker volume. The published container port is bound to loopback for local use.
 
 ## Local API
 
-- `GET /api/health` reports local preview mode and confirms that payments are disabled.
+- `GET /api/health` reports local pilot mode, whether operator review is configured, and that payments are disabled.
 - `GET /api/products` returns the same example catalog used by the web app.
 - `POST /api/harvest-demand` accepts a crop, supported community, and household quantity without collecting personal details.
 - `GET /api/harvest-demand` returns aggregate quantity and signal counts by crop and community, never individual signal records.
+- `POST /api/harvest-listings` creates a private pending offer with the grower's stated minimum payout.
+- `GET /api/harvest-listings` returns approved offers only.
+- `GET /api/harvest-listings?scope=review` returns the pending queue with `Authorization: Bearer <operator-key>`.
+- `POST /api/operator/harvest-listings/{id}/decision` approves or declines a pending offer. Approval checks that grower payout is at least the stated floor and calculates the customer price from the four visible price components.
 - `POST /api/demo/orders` records a non-personal sample order. The request body contains only product IDs and quantities.
 - `GET /api/demo/orders/{reference}` retrieves that sample order and its price breakdown.
 
-The API binds to `127.0.0.1` by default. It has no login, farmer identity checks, production inventory, payment integration, or public deployment hardening. Do not expose it to the internet or use it for real orders. The GitHub Pages site hosts the frontend only and does not connect to this local API.
+The API binds to `127.0.0.1` by default. The operator key protects review endpoints; it is a small pilot control, not a substitute for production user accounts, identity checks, rate limits, or a security review. Do not expose this server to the internet or use it for real orders. The GitHub Pages site hosts the frontend only and does not connect to this local API, so offers submitted there are saved in that browser and cannot be reviewed or published.
 
 ## Product direction
 
@@ -91,6 +100,7 @@ Replace sample data with field-verified records; add authenticated farmer, custo
 - React, TypeScript, Vite, and Lucide icons
 - Python standard-library HTTP server for the local order API
 - SQLite for local sample-order persistence
+- Operator-key protected review and approval for harvest listings
 - Docker Compose for a one-command local package
 
 ## License
