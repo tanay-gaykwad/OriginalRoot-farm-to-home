@@ -7,7 +7,7 @@ OriginalRoot is a locally hosted farmer-to-home marketplace workflow for growers
 
 ## See it working
 
-Open the [public OriginalRoot preview](https://tanay-gaykwad.github.io/originalroot-farm-to-home/) to browse the sample customer experience without installing anything. Try searching the harvest board, opening a Farm Passport, and viewing the illustrative price split. The preview uses fictional data and does not connect to the local database or API.
+Open the [OriginalRoot website](https://tanay-gaykwad.github.io/originalroot-farm-to-home/) to learn about the brand and its approach. Choose **Explore OriginalRoot** to enter the marketplace workspace, or open the local platform with Docker or the desktop installer for shared local data and API workflows.
 
 To try the working local workflows, start OriginalRoot with Docker Compose using the steps below. The customer preview, grower accounts, operator review, order tracking, and support queue then share a local SQLite database.
 
@@ -23,7 +23,7 @@ Read the [Windows installer guide](docs/DESKTOP_INSTALLER.md) for setup, first o
 
 ## Current scope
 
-The GitHub Pages site is a static preview with fictional farms, listings, harvest records, prices, and grower figures. The Docker app includes a local API and SQLite persistence for offers, accounts, orders, delivery handoffs, and support tickets. Neither version integrates payment providers, SMS, or a driver network. The application does not independently verify farmer identity, farm claims, produce quality, or food safety. Keep the Docker service on loopback and use fictional data until production identity, privacy, food-handling, payment, and security controls are in place.
+The public homepage is the OriginalRoot brand introduction. The platform app is available through its **Explore OriginalRoot** action and at `/?platform=1`; its marketplace, grower, and operations workspaces have distinct shareable URLs. GitHub Pages has static example data and no shared API or database. The Docker and Windows desktop apps use a local API and SQLite database for grower offers and accounts, operator review, orders, delivery handoffs, batch records, and support tickets. The local service does not integrate payments, SMS, or a driver network and must remain bound to loopback. Current data and workflow limitations are in [Phase 11 and the remaining launch roadmap](docs/PHASE_11.md).
 
 ## What you can explore
 
@@ -61,6 +61,8 @@ Phase 8 adds customer order complaints, grower grievances, private ticket lookup
 Phase 9 adds private grower image submissions for a batch, operator evidence review, checksum-checked local file storage, and approved evidence on the public batch passport. Operator review is not independent certification. See the [Phase 9 evidence workflow](docs/PHASE_9.md).
 
 Phase 10 adds owner-controlled operator suspension and reactivation, session revocation, verified database-and-evidence backup bundles, and a careful restore command. See the [Phase 10 operations guide](docs/PHASE_10.md) and the [local pilot runbook](docs/PILOT_RUNBOOK.md).
+
+Phase 11 separates the OriginalRoot brand introduction from the marketplace, grower, and operator workspaces. It also records what must be built and validated before a controlled pilot or public customer launch. See the [Phase 11 structure and launch roadmap](docs/PHASE_11.md).
 
 ## Run locally
 

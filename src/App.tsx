@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import productCatalog from "./catalog.json";
+import { BrandSite } from "./BrandSite";
 import { OperatorSpace, OrderRequestModal, OrderTrackingModal, PublishedHarvests, type PublishedOffer } from "./PhaseTwo";
 import { BatchPassportModal } from "./PhaseFour";
 import { GrowerWorkspace } from "./PhaseFive";
@@ -76,9 +77,28 @@ function ProductCard({ product, quantity, onAdd, onTrace }: { product: Product; 
   );
 }
 
-function App() {
+type Workspace = "shop" | "grower" | "operator";
+
+function currentWorkspace(): Workspace {
+  const workspace = new URLSearchParams(window.location.search).get("workspace");
+  return workspace === "grower" || workspace === "operator" ? workspace : "shop";
+}
+
+function isPlatformRoute(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("platform") === "1" || params.has("passport") || params.has("workspace");
+}
+
+function MarketplaceApp() {
   const [cart, setCart] = useState<Cart>(() => JSON.parse(localStorage.getItem("OriginalRoot-cart") || "{}"));
-  const [mode, setMode] = useState<"shop" | "grower" | "operator">("shop");
+  const [mode, setModeState] = useState<Workspace>(currentWorkspace);
+  function setMode(next: Workspace) {
+    setModeState(next);
+    const url = new URL(window.location.href);
+    url.searchParams.set("platform", "1");
+    url.searchParams.set("workspace", next);
+    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
   const [category, setCategory] = useState("Everything");
   const [query, setQuery] = useState("");
   const [cartOpen, setCartOpen] = useState(false);
@@ -94,6 +114,11 @@ function App() {
   const [orderRequestsAvailable, setOrderRequestsAvailable] = useState(false);
 
   useEffect(() => { localStorage.setItem("OriginalRoot-cart", JSON.stringify(cart)); }, [cart]);
+  useEffect(() => {
+    const syncWorkspace = () => setModeState(currentWorkspace());
+    window.addEventListener("popstate", syncWorkspace);
+    return () => window.removeEventListener("popstate", syncWorkspace);
+  }, []);
   useEffect(() => { fetch("/api/harvest-listings").then((response) => response.ok ? response.json() : null).then((result) => {
     const listings: PublishedOffer[] = result?.listings || [];
     setPublishedOffers(listings);
@@ -180,17 +205,17 @@ function App() {
   }
 
   return (
-    <div className="app" id="top">
-      <div className="announcement"><span className="announcement-dot" /> Phase 1 · Local harvest planning <span className="announcement-sep">·</span> Illustrative listings; no live sale or delivery <span className="announcement-sep">·</span> <button onClick={() => document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" })}>How OriginalRoot works <ArrowRight size={13} /></button></div>
+    <div className="app platform-mode" id="top">
+      <div className="announcement"><span className="announcement-dot" /> OriginalRoot platform <span className="announcement-sep">·</span> Marketplace, grower workspace, and local operations <span className="announcement-sep">·</span> <a href={(() => { const url = new URL(window.location.href); url.search = ""; url.hash = ""; return `${url.pathname}`; })()}>About OriginalRoot <ArrowRight size={13} /></a></div>
       <header className="site-header">
         <div className="header-inner">
           <Logo />
-          <button className="delivery-location" onClick={() => setNotice("Showing sample listings for Mysuru and nearby communities.")}><MapPin size={16} /><span><small>CONCEPT MARKET</small><b>Mysuru, Karnataka</b></span><ChevronDown size={14} /></button>
+          <button className="delivery-location" onClick={() => setNotice("This local workspace is configured for Mysuru and nearby communities.")}><MapPin size={16} /><span><small>LOCAL MARKET</small><b>Mysuru, Karnataka</b></span><ChevronDown size={14} /></button>
           <div className={`main-nav ${mobileNav ? "nav-open" : ""}`}>
-            <button className={mode === "shop" ? "nav-active" : ""} onClick={() => { setMode("shop"); setMobileNav(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Shop the harvest</button>
-            <a href="#how-it-works" onClick={() => setMobileNav(false)}>How it works</a>
-            <button className={mode === "grower" ? "nav-active" : ""} onClick={() => { setMode("grower"); setMobileNav(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}>For growers</button>
+            <button className={mode === "shop" ? "nav-active" : ""} onClick={() => { setMode("shop"); setMobileNav(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Marketplace</button>
+            <button className={mode === "grower" ? "nav-active" : ""} onClick={() => { setMode("grower"); setMobileNav(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Grower workspace</button>
             <button className={mode === "operator" ? "nav-active" : ""} onClick={() => { setMode("operator"); setMobileNav(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Operations</button>
+            <button onClick={() => { setModal({ type: "track" }); setMobileNav(false); }}>Track order</button>
           </div>
           <div className="header-actions"><button className="icon-button account-button" onClick={() => setMode(mode === "shop" ? "grower" : "shop")} title="Switch view"><UsersRound size={18} /></button><button className="bag-button" onClick={() => setCartOpen(true)}><ShoppingBag size={17} /><span>Your bag</span>{cartCount > 0 && <b>{cartCount}</b>}</button><button className="mobile-menu" onClick={() => setMobileNav(!mobileNav)} aria-label="Toggle navigation">{mobileNav ? <X /> : <Menu />}</button></div>
         </div>
@@ -219,7 +244,7 @@ function App() {
 
           <section className="farmer-cta wrap"><div className="cta-art"><span className="cta-sun" /><span className="cta-field" /><span className="cta-person">🧑🏽‍🌾</span><span className="cta-plant">🌾</span><span className="cta-note">Built with<br />growers in mind</span></div><div className="cta-copy"><div className="eyebrow"><span className="eyebrow-line" /> For the people who grow</div><h2>Your harvest deserves<br />a <em>better conversation.</em></h2><p>Bring your produce, your standards, and your voice. OriginalRoot is built to make offers, grading, and payments easier to see and question.</p><div className="cta-points"><span><Check size={14} /> Clear weights and grading notes</span><span><Check size={14} /> A payout record you can follow</span><span><Check size={14} /> Sell now or plan a confirmed order</span></div><button className="button button-dark" onClick={() => setMode("grower")}>Explore the grower space <ArrowRight size={16} /></button></div></section>
         </main>
-        <footer className="site-footer"><div className="wrap footer-top"><div><Logo /><p>Good food has a real starting point.<br />We’re making it easier to see.</p></div><div className="footer-links"><a href="#the-harvest">Shop the harvest</a><a href="#how-it-works">How it works</a><button onClick={() => setMode("grower")}>Grow with OriginalRoot</button><button onClick={() => setModal({ type: "track" })}>Track an order</button></div><div className="footer-location"><span className="fresh-dot" /> Pilot focus <b>Mysuru & nearby</b><small>Farm and product records are illustrative</small></div></div><div className="wrap footer-bottom"><span>© 2026 OriginalRoot · A local-first food network</span><span>Clear records. Fair terms. No scarcity games.</span><button onClick={() => setNotice("Farm and product records are illustrative. The local API supports local delivery or pickup requests without payment; GitHub Pages has no shared order service.")}>Data & service note</button></div></footer>
+        <footer className="site-footer"><div className="wrap footer-top"><div><Logo /><p>Good food has a real starting point.<br />We’re making it easier to see.</p></div><div className="footer-links"><a href="#the-harvest">Browse harvest</a><a href={(() => { const url = new URL(window.location.href); url.search = ""; url.hash = ""; return url.pathname; })()}>About OriginalRoot</a><button onClick={() => setMode("grower")}>Grow with OriginalRoot</button><button onClick={() => setModal({ type: "track" })}>Track an order</button></div><div className="footer-location"><span className="fresh-dot" /> Local focus <b>Mysuru & nearby</b><small>Example catalog; live listings require local review</small></div></div><div className="wrap footer-bottom"><span>© 2026 OriginalRoot · A local-first food network</span><span>Clear records. Fair terms. No scarcity games.</span><button onClick={() => setNotice("The local API supports grower offers, review, orders, support, and delivery handoffs. Payments are not enabled; GitHub Pages has no shared database.")}>Data & service note</button></div></footer>
       </> : mode === "grower" ? <GrowerWorkspace onShop={showShop} /> : <OperatorSpace onShop={showShop} />}
 
       {cartOpen && <div className="drawer-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setCartOpen(false); }}><aside className="cart-drawer"><div className="drawer-head"><div><span className="eyebrow">Your basket</span><h2>{cartCount ? `${cartCount} good ${cartCount === 1 ? "thing" : "things"}` : "Room for something fresh?"}</h2></div><button className="icon-button" onClick={() => setCartOpen(false)} aria-label="Close bag"><X size={19} /></button></div>{ordered && <div className="order-success"><CircleCheck size={20} /><span><b>Sample order recorded.</b><small>{orderConfirmation}</small><small>No payment was taken; no produce was reserved.</small></span></div>}{cartCount === 0 ? <div className="empty-bag"><span>🧺</span><p>Your bag is waiting for this week’s harvest.</p><button className="button button-dark" onClick={() => { setCartOpen(false); document.getElementById("the-harvest")?.scrollIntoView({ behavior: "smooth" }); }}>Browse the harvest <ArrowRight size={15} /></button></div> : <><div className="cart-items">{products.filter((p) => cart[p.id]).map((product) => <div className="cart-line" key={product.id}><span className={`cart-thumb art-${product.color}`}>{product.emoji}</span><div className="cart-line-main"><b>{product.name}</b><small>{money(product.price)} / {product.unit}</small><button className="cart-trace-link" onClick={() => setModal({ type: "trace", product })}><QrCode size={12} /> Meet this batch</button></div><div className="qty-control"><button onClick={() => add(product, -1)} aria-label="Remove one"><Minus size={12} /></button><span>{cart[product.id]}</span><button onClick={() => add(product)} aria-label="Add one"><Plus size={12} /></button></div></div>)}</div><div className="price-waterfall"><div className="waterfall-title"><span>Where your money goes</span><span>Per order</span></div><div><span>Growers receive</span><b>{money(farmerTotal)}</b></div><div><span>Sorting & packing</span><b>{money(packingTotal)}</b></div><div><span>OriginalRoot coordination</span><b>{money(platformTotal)}</b></div><div><span>Local delivery</span><b>{money(delivery)}</b></div><div className="waterfall-total"><span>You pay</span><b>{money(total)}</b></div><small>Illustrative price split. Actual prices depend on crop, batch, and route.</small></div><button className="checkout-button" onClick={checkout} disabled={placingOrder}><span>{placingOrder ? "Recording sample order…" : "Continue to checkout"}</span><b>{money(total)} <ArrowRight size={16} /></b></button><div className="drawer-assurance"><ShieldCheck size={15} /> No payment is collected in this prototype.</div></>}</aside></div>}
@@ -239,5 +264,13 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  const [platform, setPlatform] = useState(isPlatformRoute);
+  useEffect(() => {
+    const syncRoute = () => setPlatform(isPlatformRoute());
+    window.addEventListener("popstate", syncRoute);
+    return () => window.removeEventListener("popstate", syncRoute);
+  }, []);
+  return platform ? <MarketplaceApp /> : <BrandSite />;
+}
 
