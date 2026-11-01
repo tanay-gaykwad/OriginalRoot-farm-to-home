@@ -48,7 +48,7 @@ export function BatchPassportModal({ listing, onClose }: { listing: PublishedOff
   </section></div>;
 }
 
-export function PassportOperator({ authKey }: { authKey: string }) {
+export function PassportOperator() {
   const [batches, setBatches] = useState<OperatorBatch[]>([]);
   const [selected, setSelected] = useState("");
   const [events, setEvents] = useState<PassportEvent[]>([]);
@@ -56,7 +56,7 @@ export function PassportOperator({ authKey }: { authKey: string }) {
   const [busy, setBusy] = useState(false);
 
   async function refreshBatches() {
-    const response = await fetch("/api/operator/passports", { headers: { Authorization: `Bearer ${authKey}` } });
+    const response = await fetch("/api/operator/passports");
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.detail || "Could not load published batches.");
     const next = (result.listings || []) as OperatorBatch[];
@@ -72,7 +72,7 @@ export function PassportOperator({ authKey }: { authKey: string }) {
     setEvents(result.events || []);
   }
 
-  useEffect(() => { refreshBatches().catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load published batches.")); }, [authKey]);
+  useEffect(() => { refreshBatches().catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load published batches.")); }, []);
   useEffect(() => { refreshEvents(selected).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load checkpoint history.")); }, [selected]);
 
   async function recordCheckpoint(event: FormEvent<HTMLFormElement>) {
@@ -81,7 +81,7 @@ export function PassportOperator({ authKey }: { authKey: string }) {
     const form = new FormData(formElement);
     setBusy(true); setError("");
     try {
-      const response = await fetch(`/api/operator/harvest-listings/${encodeURIComponent(selected)}/passport-events`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${authKey}` }, body: JSON.stringify({ event_type: String(form.get("event_type")), location: String(form.get("location") || ""), detail: String(form.get("detail") || "") }) });
+      const response = await fetch(`/api/operator/harvest-listings/${encodeURIComponent(selected)}/passport-events`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ event_type: String(form.get("event_type")), location: String(form.get("location") || ""), detail: String(form.get("detail") || "") }) });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.detail || "Could not save checkpoint.");
       formElement.reset();

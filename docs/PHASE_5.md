@@ -25,7 +25,7 @@ Replace the illustrative grower dashboard with an account-backed workspace. A gr
 
 ## Local service and privacy boundary
 
-Accounts and sessions live in the local SQLite database and are available only to this local app. Existing offers from before Phase 5 have no account owner and do not appear in any grower's private list. Password recovery, account deletion, field identity checks, multi-factor authentication, and separate operator accounts are not implemented. The operator workspace still uses the local shared operator key.
+Accounts and sessions live in the local SQLite database and are available only to this local app. Existing offers from before Phase 5 have no account owner and do not appear in any grower's private list. Password recovery, account deletion, field identity checks, and multi-factor authentication are not implemented. At the end of Phase 5, the operator workspace still used the local shared operator key; Phase 6 replaces that with named operator accounts.
 
 This service remains local-only. Before internet deployment it needs HTTPS with secure cookies, origin/CSRF protections reviewed for the deployment, throttling, credential recovery and support, user deletion/retention controls, authenticated operator roles, backups, and a security review. A profile name is self-entered and does not prove farmer or farm identity.
 

@@ -16,7 +16,7 @@ Let a customer request an approved harvest for pickup, reserve only available qu
 
 ## Local setup
 
-Set `OriginalRoot_OPERATOR_TOKEN` before starting the API (see [Phase 2 setup](PHASE_2.md)). Then run the Vite site and API locally. Order requests are disabled unless the operator key is configured. The local API is bound to loopback by default; order contact details are written to the local SQLite database and must be handled as private data.
+Set `OriginalRoot_OPERATOR_TOKEN` before starting the API (see [Phase 2 setup](PHASE_2.md)). It is used once to bootstrap the first operator account; later order management requires an individual operator session. Order requests remain disabled until the first operator account exists. The local API is bound to loopback by default; order contact details are written to the local SQLite database and must be handled as private data.
 
 ## Hosted site boundary
 
@@ -28,7 +28,7 @@ GitHub Pages cannot run the SQLite API. It therefore disables order requests and
 - A request must match the offer's pickup community and have valid quantity and mobile number.
 - Concurrent requests cannot reserve more than the approved offer quantity.
 - The order price and price split are locked at request time.
-- Customer tracking returns no contact data; only an operator-key authenticated queue can read customer contact details.
+- Customer tracking returns no contact data; only a signed-in operator account can read customer contact details.
 - Operator transitions outside the stated order lifecycle are rejected.
 - Cancellation returns the quantity to the offer's remaining balance.
 - No payment is taken and no home delivery is promised.

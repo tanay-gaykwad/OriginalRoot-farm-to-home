@@ -121,6 +121,37 @@ def connect_db() -> sqlite3.Connection:
         )"""
     )
     connection.execute(
+        """CREATE TABLE IF NOT EXISTS operator_users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            full_name TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('owner', 'operator')),
+            password_hash TEXT NOT NULL,
+            password_salt TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS operator_sessions (
+            token_hash TEXT PRIMARY KEY,
+            operator_id TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS operator_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operator_id TEXT NOT NULL,
+            operator_name TEXT NOT NULL,
+            action TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
         """CREATE TABLE IF NOT EXISTS harvest_orders (
             reference TEXT PRIMARY KEY,
             listing_id TEXT NOT NULL,
@@ -208,15 +239,53 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         return payload
 
     def _operator_authorized(self) -> bool:
-        if not OPERATOR_TOKEN:
-            self._send_json(503, {"detail": "Operator access is not configured on this server"})
+        operator = self._operator_session()
+        if operator is None:
+            self._send_json(401, {"detail": "Sign in with an operator account"})
             return False
-        supplied = self.headers.get("Authorization", "")
-        expected = f"Bearer {OPERATOR_TOKEN}"
-        if not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
-            self._send_json(401, {"detail": "Operator key is missing or invalid"})
-            return False
+        self.current_operator = operator
         return True
+
+    def _operator_session(self) -> sqlite3.Row | None:
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+            morsel = cookie.get("OriginalRoot_operator_session")
+            if morsel is None:
+                return None
+            token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            with closing(connect_db()) as connection:
+                return connection.execute(
+                    """SELECT operator_users.id, operator_users.username, operator_users.full_name, operator_users.role
+                       FROM operator_sessions JOIN operator_users ON operator_users.id = operator_sessions.operator_id
+                       WHERE operator_sessions.token_hash = ? AND operator_sessions.expires_at > ?""",
+                    (token_hash, now),
+                ).fetchone()
+        except (sqlite3.Error, ValueError):
+            return None
+
+    @staticmethod
+    def _operator_account_exists() -> bool:
+        with closing(connect_db()) as connection:
+            return connection.execute("SELECT 1 FROM operator_users LIMIT 1").fetchone() is not None
+
+    def _operator_is_owner(self) -> bool:
+        if getattr(self, "current_operator", None) and self.current_operator["role"] == "owner":
+            return True
+        self._send_json(403, {"detail": "Only the workspace owner can manage operator accounts"})
+        return False
+
+    def _record_operator_audit(self, action: str, entity_type: str, entity_id: str, detail: str) -> None:
+        operator = getattr(self, "current_operator", None)
+        if operator is None:
+            return
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with closing(connect_db()) as connection, connection:
+            connection.execute(
+                "INSERT INTO operator_audit (operator_id, operator_name, action, entity_type, entity_id, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (operator["id"], operator["full_name"], action, entity_type, entity_id, detail[:240], now),
+            )
 
     def _grower_session(self) -> sqlite3.Row | None:
         cookie = SimpleCookie()
@@ -238,11 +307,11 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             return None
 
     @staticmethod
-    def _session_cookie(token: str, *, clear: bool = False) -> str:
+    def _session_cookie(token: str, *, clear: bool = False, cookie_name: str = "OriginalRoot_session") -> str:
         secure = "; Secure" if os.environ.get("OriginalRoot_COOKIE_SECURE") == "1" else ""
         if clear:
-            return f"OriginalRoot_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict{secure}"
-        return f"OriginalRoot_session={token}; Path=/; Max-Age=604800; HttpOnly; SameSite=Strict{secure}"
+            return f"{cookie_name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict{secure}"
+        return f"{cookie_name}={token}; Path=/; Max-Age=604800; HttpOnly; SameSite=Strict{secure}"
 
     @staticmethod
     def _password_hash(password: str, salt_hex: str) -> str:
@@ -261,7 +330,8 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = urlsplit(self.path).path
         if path == "/api/health":
-            self._send_json(200, {"status": "ok", "mode": "local-pilot", "operator_review_enabled": bool(OPERATOR_TOKEN), "order_requests_enabled": bool(OPERATOR_TOKEN), "payments_enabled": False})
+            operator_ready = self._operator_account_exists()
+            self._send_json(200, {"status": "ok", "mode": "local-pilot", "operator_review_enabled": operator_ready, "order_requests_enabled": operator_ready, "payments_enabled": False})
             return
         if path == "/api/grower/me":
             grower = self._grower_session()
@@ -278,6 +348,33 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             with closing(connect_db()) as connection:
                 rows = connection.execute("SELECT id, crop, community, available_quantity, unit, harvest_window, minimum_payout, status, approved_quantity, grade, grower_payout, buyer_price, decision_note, created_at, reviewed_at FROM harvest_listings WHERE grower_id = ? ORDER BY created_at DESC", (grower["id"],)).fetchall()
             self._send_json(200, {"listings": [dict(row) for row in rows]})
+            return
+        if path == "/api/operator/setup-status":
+            with closing(connect_db()) as connection:
+                has_operator = connection.execute("SELECT 1 FROM operator_users LIMIT 1").fetchone() is not None
+            self._send_json(200, {"setup_required": not has_operator, "operator_access_configured": bool(OPERATOR_TOKEN)})
+            return
+        if path == "/api/operator/me":
+            operator = self._operator_session()
+            if operator is None:
+                self._send_json(401, {"detail": "Sign in with an operator account"})
+                return
+            self.current_operator = operator
+            self._send_json(200, {"operator": {key: operator[key] for key in ("id", "username", "full_name", "role")}})
+            return
+        if path == "/api/operator/users":
+            if not self._operator_authorized() or not self._operator_is_owner():
+                return
+            with closing(connect_db()) as connection:
+                users = connection.execute("SELECT id, username, full_name, role, created_at FROM operator_users ORDER BY created_at").fetchall()
+            self._send_json(200, {"operators": [dict(row) for row in users]})
+            return
+        if path == "/api/operator/audit":
+            if not self._operator_authorized():
+                return
+            with closing(connect_db()) as connection:
+                rows = connection.execute("SELECT operator_name, action, entity_type, entity_id, detail, created_at FROM operator_audit ORDER BY id DESC LIMIT 100").fetchall()
+            self._send_json(200, {"events": [dict(row) for row in rows]})
             return
         if path == "/api/products":
             self._send_json(200, {"mode": "sample-data", "products": CATALOG})
@@ -402,6 +499,148 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         request_path = urlsplit(self.path).path
+        if request_path == "/api/operator/bootstrap":
+            if not OPERATOR_TOKEN:
+                self._send_json(503, {"detail": "Set the local bootstrap key before setting up the first operator"})
+                return
+            try:
+                payload = self._read_json()
+                bootstrap_key = payload.get("bootstrap_key")
+                full_name = payload.get("full_name")
+                username = payload.get("username")
+                password = payload.get("password")
+                if not isinstance(bootstrap_key, str) or not hmac.compare_digest(bootstrap_key.encode(), OPERATOR_TOKEN.encode()):
+                    self._send_json(401, {"detail": "Bootstrap key is invalid"})
+                    return
+                if not isinstance(full_name, str) or not 2 <= len(full_name.strip()) <= 80:
+                    raise ValueError("Name must be 2 to 80 characters")
+                if not isinstance(username, str) or not re.fullmatch(r"[a-zA-Z0-9_.-]{3,32}", username):
+                    raise ValueError("Username must be 3 to 32 letters, numbers, dots, dashes, or underscores")
+                if not isinstance(password, str) or not 12 <= len(password) <= 128:
+                    raise ValueError("Password must be 12 to 128 characters")
+                username = username.lower()
+                salt = secrets.token_hex(16)
+                password_hash = self._password_hash(password, salt)
+                operator_id = uuid.uuid4().hex
+                now = datetime.now(timezone.utc)
+                token, token_hash = self._session_token()
+                with closing(connect_db()) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    if connection.execute("SELECT 1 FROM operator_users LIMIT 1").fetchone():
+                        connection.rollback()
+                        self._send_json(409, {"detail": "Operator setup has already been completed"})
+                        return
+                    connection.execute("INSERT INTO operator_users (id, username, full_name, role, password_hash, password_salt, created_at) VALUES (?, ?, ?, 'owner', ?, ?, ?)", (operator_id, username, full_name.strip(), password_hash, salt, now.isoformat(timespec="seconds")))
+                    connection.execute("INSERT INTO operator_sessions (token_hash, operator_id, expires_at, created_at) VALUES (?, ?, ?, ?)", (token_hash, operator_id, (now + timedelta(days=7)).isoformat(timespec="seconds"), now.isoformat(timespec="seconds")))
+                    connection.execute("INSERT INTO operator_audit (operator_id, operator_name, action, entity_type, entity_id, detail, created_at) VALUES (?, ?, 'owner_created', 'operator', ?, 'Initial workspace owner setup', ?)", (operator_id, full_name.strip(), operator_id, now.isoformat(timespec="seconds")))
+                    connection.commit()
+            except sqlite3.IntegrityError:
+                self._send_json(409, {"detail": "That username is already in use"})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            self._send_json(201, {"operator": {"id": operator_id, "username": username, "full_name": full_name.strip(), "role": "owner"}}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_operator_session")})
+            return
+        if request_path == "/api/operator/login":
+            try:
+                payload = self._read_json()
+                username = payload.get("username")
+                password = payload.get("password")
+                if not isinstance(username, str) or not isinstance(password, str) or len(username) > 32 or len(password) > 128:
+                    raise ValueError("Enter a valid username and password")
+                with closing(connect_db()) as connection:
+                    operator = connection.execute("SELECT id, username, full_name, role, password_hash, password_salt FROM operator_users WHERE username = ?", (username.lower(),)).fetchone()
+                supplied_hash = self._password_hash(password, operator["password_salt"] if operator else "00" * 16)
+                if operator is None or not hmac.compare_digest(supplied_hash, operator["password_hash"]):
+                    self._send_json(401, {"detail": "Username or password is incorrect"})
+                    return
+                now = datetime.now(timezone.utc)
+                token, token_hash = self._session_token()
+                with closing(connect_db()) as connection, connection:
+                    connection.execute("DELETE FROM operator_sessions WHERE expires_at <= ?", (now.isoformat(timespec="seconds"),))
+                    connection.execute("INSERT INTO operator_sessions (token_hash, operator_id, expires_at, created_at) VALUES (?, ?, ?, ?)", (token_hash, operator["id"], (now + timedelta(days=7)).isoformat(timespec="seconds"), now.isoformat(timespec="seconds")))
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            self._send_json(200, {"operator": {key: operator[key] for key in ("id", "username", "full_name", "role")}}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_operator_session")})
+            return
+        if request_path == "/api/operator/logout":
+            cookie = SimpleCookie()
+            try:
+                cookie.load(self.headers.get("Cookie", ""))
+                morsel = cookie.get("OriginalRoot_operator_session")
+                if morsel:
+                    token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
+                    with closing(connect_db()) as connection, connection:
+                        connection.execute("DELETE FROM operator_sessions WHERE token_hash = ?", (token_hash,))
+            except (sqlite3.Error, ValueError):
+                pass
+            self._send_json(200, {"status": "signed_out"}, {"Set-Cookie": self._session_cookie("", clear=True, cookie_name="OriginalRoot_operator_session")})
+            return
+        if request_path == "/api/operator/password":
+            if not self._operator_authorized():
+                return
+            try:
+                payload = self._read_json()
+                current_password = payload.get("current_password")
+                new_password = payload.get("new_password")
+                if not isinstance(current_password, str) or len(current_password) > 128:
+                    raise ValueError("Enter your current password")
+                if not isinstance(new_password, str) or not 12 <= len(new_password) <= 128:
+                    raise ValueError("New password must be 12 to 128 characters")
+                with closing(connect_db()) as connection:
+                    account = connection.execute("SELECT password_hash, password_salt FROM operator_users WHERE id = ?", (self.current_operator["id"],)).fetchone()
+                current_hash = self._password_hash(current_password, account["password_salt"])
+                if not hmac.compare_digest(current_hash, account["password_hash"]):
+                    self._send_json(401, {"detail": "Current password is incorrect"})
+                    return
+                salt = secrets.token_hex(16)
+                password_hash = self._password_hash(new_password, salt)
+                now = datetime.now(timezone.utc)
+                token, token_hash = self._session_token()
+                with closing(connect_db()) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.execute("UPDATE operator_users SET password_hash = ?, password_salt = ? WHERE id = ?", (password_hash, salt, self.current_operator["id"]))
+                    connection.execute("DELETE FROM operator_sessions WHERE operator_id = ?", (self.current_operator["id"],))
+                    connection.execute("INSERT INTO operator_sessions (token_hash, operator_id, expires_at, created_at) VALUES (?, ?, ?, ?)", (token_hash, self.current_operator["id"], (now + timedelta(days=7)).isoformat(timespec="seconds"), now.isoformat(timespec="seconds")))
+                    connection.execute("INSERT INTO operator_audit (operator_id, operator_name, action, entity_type, entity_id, detail, created_at) VALUES (?, ?, 'password_changed', 'operator', ?, 'Operator changed their password; previous sessions revoked', ?)", (self.current_operator["id"], self.current_operator["full_name"], self.current_operator["id"], now.isoformat(timespec="seconds")))
+                    connection.commit()
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            self._send_json(200, {"status": "password_changed"}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_operator_session")})
+            return
+        if request_path == "/api/operator/users":
+            if not self._operator_authorized() or not self._operator_is_owner():
+                return
+            try:
+                payload = self._read_json()
+                full_name = payload.get("full_name")
+                username = payload.get("username")
+                password = payload.get("password")
+                if not isinstance(full_name, str) or not 2 <= len(full_name.strip()) <= 80:
+                    raise ValueError("Name must be 2 to 80 characters")
+                if not isinstance(username, str) or not re.fullmatch(r"[a-zA-Z0-9_.-]{3,32}", username):
+                    raise ValueError("Username must be 3 to 32 letters, numbers, dots, dashes, or underscores")
+                if not isinstance(password, str) or not 12 <= len(password) <= 128:
+                    raise ValueError("Password must be 12 to 128 characters")
+                username = username.lower()
+                salt = secrets.token_hex(16)
+                password_hash = self._password_hash(password, salt)
+                operator_id = uuid.uuid4().hex
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                with closing(connect_db()) as connection, connection:
+                    connection.execute("INSERT INTO operator_users (id, username, full_name, role, password_hash, password_salt, created_at) VALUES (?, ?, ?, 'operator', ?, ?, ?)", (operator_id, username, full_name.strip(), password_hash, salt, now))
+                self._record_operator_audit("operator_created", "operator", operator_id, f"Created operator account @{username}")
+            except sqlite3.IntegrityError:
+                self._send_json(409, {"detail": "That username is already in use"})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            self._send_json(201, {"operator": {"id": operator_id, "username": username, "full_name": full_name.strip(), "role": "operator", "created_at": now}})
+            return
         if request_path == "/api/grower/register":
             try:
                 payload = self._read_json()
@@ -469,8 +708,8 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"status": "signed_out"}, {"Set-Cookie": self._session_cookie("", clear=True)})
             return
         if request_path == "/api/orders":
-            if not OPERATOR_TOKEN:
-                self._send_json(503, {"detail": "Order requests are disabled until a local operator key is configured"})
+            if not self._operator_account_exists():
+                self._send_json(503, {"detail": "Order requests are disabled until the first operator account is created"})
                 return
             try:
                 payload = self._read_json()
@@ -554,6 +793,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                         connection.rollback()
                         self._send_json(503, {"detail": "Could not update the order. Please retry."})
                         return
+                self._record_operator_audit("order_status_changed", "order", reference, f"Status set to {new_status}")
                 self._send_json(200, {"reference": reference, "status": new_status, "updated_at": now})
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
@@ -576,14 +816,16 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 if not isinstance(detail, str) or not 3 <= len(detail.strip()) <= 240:
                     raise ValueError("Add a 3 to 240 character record note")
                 now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-                with closing(connect_db()) as connection:
+                with closing(connect_db()) as connection, connection:
                     listing = connection.execute("SELECT id FROM harvest_listings WHERE id = ? AND status = 'published'", (listing_id,)).fetchone()
                     if listing is None:
                         self._send_json(404, {"detail": "Published batch not found"})
                         return
                     event_id = uuid.uuid4().hex
-                    connection.execute("INSERT INTO harvest_passport_events (id, listing_id, event_type, location, detail, recorded_by, created_at) VALUES (?, ?, ?, ?, ?, 'OriginalRoot operator', ?)", (event_id, listing_id, event_type, location.strip(), detail.strip(), now))
-                self._send_json(201, {"event": {"id": event_id, "listing_id": listing_id, "event_type": event_type, "location": location.strip(), "detail": detail.strip(), "recorded_by": "OriginalRoot operator", "created_at": now}})
+                    recorded_by = self.current_operator["full_name"]
+                    connection.execute("INSERT INTO harvest_passport_events (id, listing_id, event_type, location, detail, recorded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (event_id, listing_id, event_type, location.strip(), detail.strip(), recorded_by, now))
+                self._record_operator_audit("passport_checkpoint_added", "harvest_listing", listing_id, f"Recorded {event_type} checkpoint")
+                self._send_json(201, {"event": {"id": event_id, "listing_id": listing_id, "event_type": event_type, "location": location.strip(), "detail": detail.strip(), "recorded_by": recorded_by, "created_at": now}})
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
             return
@@ -670,6 +912,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                         connection.rollback()
                         self._send_json(503, {"detail": "Could not update the order. Please retry."})
                         return
+                self._record_operator_audit("order_status_changed", "order", reference, f"Status set to {new_status}")
                 self._send_json(200, {"reference": reference, "status": new_status, "updated_at": now})
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
@@ -766,6 +1009,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                     (status, quantity, grade, grower_payout, packing_cost, platform_fee, route_cost, buyer_price, note.strip(), reviewed_at, listing_id),
                 )
                 row = connection.execute("SELECT * FROM harvest_listings WHERE id = ?", (listing_id,)).fetchone()
+            self._record_operator_audit(f"offer_{status}", "harvest_listing", listing_id, f"Offer {status}")
             self._send_json(200, {"listing": self._listing_payload(row)})
             return
         if urlsplit(self.path).path == "/api/harvest-demand":

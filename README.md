@@ -33,6 +33,8 @@ Phase 4 adds a public record for each approved batch and an operator console for
 
 Phase 5 replaces the sample grower workspace with local grower accounts and account-owned harvest offers. Passwords are salted and hashed; sessions use an HTTP-only cookie; growers can see only their own offers. Profiles are self-entered and do not verify farmer identity. See the [Phase 5 grower account workflow](docs/PHASE_5.md).
 
+Phase 6 replaces the shared operator key for routine access with named operator accounts, owner-managed staff access, and an attributable local operations history. The bootstrap key is used only for first-time owner setup. See the [Phase 6 operator workflow](docs/PHASE_6.md).
+
 ## Run locally
 
 Run these commands from the project root:
@@ -44,7 +46,7 @@ pnpm install --frozen-lockfile
 Start the local API in one terminal:
 
 ```powershell
-$env:OriginalRoot_OPERATOR_TOKEN = "replace-with-a-long-random-secret"
+$env:OriginalRoot_OPERATOR_TOKEN = "replace-with-a-long-random-bootstrap-key"
 python api/server.py
 ```
 
@@ -69,12 +71,12 @@ Then open `http://127.0.0.1:8080`.
 
 ```powershell
 Copy-Item .env.example .env
-# Edit .env and replace the placeholder with a long random operator key.
+# Edit .env and replace the placeholder with a long random first-owner bootstrap key.
 docker compose up --build -d
 docker compose ps
 ```
 
-Open `http://127.0.0.1:8080`. Enter the same operator key shown in `.env` in the Operations page. Sample order records and harvest offers are stored in the `OriginalRoot-data` Docker volume. The app is available only on this computer; the published container port is bound to loopback. Stop it with `docker compose down`; use `docker compose down -v` only if you intend to erase its database volume.
+Open `http://127.0.0.1:8080`. In Operations, use the key from `.env` once to create the owner account, then sign in with that account. The owner can provision named operator accounts; the bootstrap key is not used for normal reviews. App data is stored in the `OriginalRoot-data` Docker volume. The app is available only on this computer; the published container port is bound to loopback. Stop it with `docker compose down`; use `docker compose down -v` only if you intend to erase its database volume.
 
 ## Local API
 
@@ -84,22 +86,28 @@ Open `http://127.0.0.1:8080`. Enter the same operator key shown in `.env` in the
 - `GET /api/harvest-demand` returns aggregate quantity and signal counts by crop and community, never individual signal records.
 - `POST /api/harvest-listings` creates a private pending offer with the grower's stated minimum payout.
 - `GET /api/harvest-listings` returns approved offers only.
-- `GET /api/harvest-listings?scope=review` returns the pending queue with `Authorization: Bearer <operator-key>`.
-- `POST /api/operator/harvest-listings/{id}/decision` approves or declines a pending offer. Approval checks that grower payout is at least the stated floor and calculates the customer price from the four visible price components.
+- `GET /api/harvest-listings?scope=review` returns the pending queue to a signed-in operator.
+- `POST /api/operator/harvest-listings/{id}/decision` approves or declines a pending offer. Approval checks that grower payout is at least the stated floor and calculates the customer price from the four visible price components. Requires an operator session.
 - `GET /api/harvest-listings/{id}/passport` returns the public batch record for an approved offer, including its price split and recorded checkpoints.
-- `GET /api/operator/passports` lists published batches for the operator console and requires the operator key.
-- `POST /api/operator/harvest-listings/{id}/passport-events` appends a harvest, weighing, grading, packing, or handoff checkpoint and requires the operator key.
+- `GET /api/operator/passports` lists published batches for a signed-in operator.
+- `POST /api/operator/harvest-listings/{id}/passport-events` appends a harvest, weighing, grading, packing, or handoff checkpoint and records the operator's name.
 - `POST /api/grower/register` creates a local grower profile; passwords must have at least 12 characters.
 - `POST /api/grower/login` and `POST /api/grower/logout` start and revoke a seven-day HTTP-only local session.
 - `GET /api/grower/me` returns the signed-in grower profile; `GET /api/grower/listings` returns only that grower's offers.
 - `POST /api/harvest-listings` requires a signed-in grower; farm name and ownership are taken from the account.
-- `POST /api/orders` requests pickup of a published offer. Quantity reservation is atomic; a local operator key must be configured. This stores the customer's name and mobile number in the local SQLite database.
+- `POST /api/orders` requests pickup of a published offer. Quantity reservation is atomic; at least one operator account must exist. This stores the customer's name and mobile number in the local SQLite database.
 - `GET /api/orders/{reference}` returns status and pickup notes without customer contact details.
-- `GET /api/operator/orders` and `POST /api/operator/orders/{reference}/status` expose and update the pickup queue with the operator key.
+- `GET /api/operator/orders` and `POST /api/operator/orders/{reference}/status` expose and update the pickup queue to signed-in operators.
+- `GET /api/operator/setup-status` checks whether the first owner account is needed.
+- `POST /api/operator/bootstrap` creates the first owner account with the local bootstrap key; after setup this endpoint cannot be used again.
+- `POST /api/operator/login`, `POST /api/operator/logout`, and `GET /api/operator/me` manage named operator sessions.
+- `POST /api/operator/password` changes the signed-in operator's password and revokes its other sessions.
+- `GET /api/operator/users` and `POST /api/operator/users` let the owner view and create operator accounts.
+- `GET /api/operator/audit` returns the latest 100 attributed operations events.
 - `POST /api/demo/orders` records a non-personal sample order. The request body contains only product IDs and quantities.
 - `GET /api/demo/orders/{reference}` retrieves that sample order and its price breakdown.
 
-The API binds to `127.0.0.1` by default. The operator key protects review and order-management endpoints; it is a small local-pilot control, not a substitute for production user accounts, identity checks, rate limits, or a security review. Do not expose this server to the internet. The GitHub Pages site hosts the frontend only, has no shared API, and disables order requests.
+The API binds to `127.0.0.1` by default. Named operator sessions protect review and order-management endpoints; the bootstrap key is limited to first-owner setup. Local sessions and the audit history are not a production identity, recovery, backup, or tamper-proof audit service. Do not expose this server to the internet. The GitHub Pages site hosts the frontend only, has no shared API, and disables account-based operations.
 
 ## Product direction
 
@@ -119,7 +127,7 @@ Replace sample data with field-verified records; add authenticated farmer, custo
 - React, TypeScript, Vite, and Lucide icons
 - Python standard-library HTTP server for the local order API
 - SQLite for local sample-order persistence
-- Operator-key protected review and approval for harvest listings
+- Named operator accounts with owner-managed provisioning and attributed local audit history
 - SQLite-backed batch passports with operator-recorded handling checkpoints
 - Local grower sessions and account-owned offer history
 - Docker Compose for a one-command local package
