@@ -25,3 +25,5 @@ jobs:
         run: pnpm build
       - name: Check API syntax
         run: python -m py_compile api/server.py
+      - name: Build local Docker image
+        run: docker build --tag originalroot-farm-to-home:ci .

@@ -37,7 +37,7 @@ pnpm build
 python -m py_compile api/server.py
 ```
 
-For changes to the static preview, also run `pnpm build:pages`. GitHub Actions runs the frontend build and API syntax check on pushes and pull requests.
+For changes to the static preview, also run `pnpm build:pages`. GitHub Actions runs the frontend build, API syntax check, and Docker image build on pushes and pull requests.
 
 ## Pull requests
 

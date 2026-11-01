@@ -172,5 +172,5 @@ OriginalRoot's original project code is released under the MIT License. Third-pa
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, change expectations, and the pull request process. Report vulnerabilities privately using the instructions in [SECURITY.md](SECURITY.md). Please do not publish secrets, personal farmer or customer information, or exploitable security details in a public issue.
 
-Automated checks build the frontend and compile-check the Python API on pushes and pull requests. The Pages workflow separately builds and publishes the static preview from `main`. These checks cover build correctness, not field readiness or operational claims.
+Automated checks build the frontend and Docker image and compile-check the Python API on pushes and pull requests. The Pages workflow separately builds and publishes the static preview from `main`. These checks cover build correctness, not field readiness or operational claims.
 
