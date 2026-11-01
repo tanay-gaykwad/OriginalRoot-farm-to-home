@@ -24,6 +24,8 @@ jobs:
       - name: Build web app
         run: pnpm build
       - name: Check API syntax
-        run: python -m py_compile api/server.py api/backup.py
+        run: python -m py_compile api/server.py api/backup.py packaging/api_entry.py
+      - name: Check desktop launcher syntax
+        run: node --check desktop/main.cjs
       - name: Build local Docker image
         run: docker build --tag originalroot-farm-to-home:ci .

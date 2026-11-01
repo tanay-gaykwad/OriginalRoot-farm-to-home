@@ -1,5 +1,7 @@
 {
   "name": "originalroot-farm-to-home",
+  "description": "A local farmer-to-home marketplace and harvest operations app.",
+  "author": "OriginalRoot",
   "private": true,
   "packageManager": "pnpm@11.25.0",
   "version": "0.1.0",
@@ -8,7 +10,8 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "build:pages": "tsc -b && vite build --mode pages"
+    "build:pages": "tsc -b && vite build --mode pages",
+    "dist:win": "pnpm build && pyinstaller --noconfirm --clean --onefile --name OriginalRoot-api --paths \"%CD%\" --add-data \"%CD%\\dist;dist\" --add-data \"%CD%\\src\\catalog.json;src\" --distpath artifacts/backend --workpath .build/pyinstaller --specpath .build packaging/api_entry.py && electron-builder --win nsis --x64"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
@@ -20,6 +23,46 @@
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1"
+    "@types/react-dom": "^18.3.1",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12"
+  },
+  "main": "desktop/main.cjs",
+  "build": {
+    "appId": "com.OriginalRoot.farmtohome",
+    "productName": "OriginalRoot",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/main.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "artifacts/backend/OriginalRoot-api.exe",
+        "to": "OriginalRoot-api.exe"
+      },
+      {
+        "from": "dist",
+        "to": "app-assets/dist"
+      },
+      {
+        "from": "src/catalog.json",
+        "to": "app-assets/src/catalog.json"
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "artifactName": "OriginalRoot-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OriginalRoot"
+    }
   }
 }

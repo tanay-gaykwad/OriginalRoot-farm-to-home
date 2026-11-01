@@ -11,6 +11,10 @@ Open the [public OriginalRoot preview](https://tanay-gaykwad.github.io/originalr
 
 To try the working local workflows, start OriginalRoot with Docker Compose using the steps below. The customer preview, grower accounts, operator review, order tracking, and support queue then share a local SQLite database.
 
+For a Windows desktop installer, download the latest `OriginalRoot-Setup` `.exe` from [GitHub Releases](https://github.com/tanay-gaykwad/originalroot-farm-to-home/releases). It installs a local desktop app that starts its API on loopback and stores its database in the current Windows user's app data. On first launch, copy the generated one-time key and use it in Operations to create the owner account. The installer is not code-signed, so Windows may show an unknown-publisher warning or a managed device may block it.
+
+Read the [Windows installer guide](docs/DESKTOP_INSTALLER.md) for setup, first owner access, and local data backup steps.
+
 ## Who it is for
 
 - **Growers:** submit harvest offers with a stated minimum payout and track offer review.

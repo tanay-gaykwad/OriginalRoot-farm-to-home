@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import sqlite3
+import sys
 import uuid
 from http.cookies import SimpleCookie
 from contextlib import closing
@@ -21,7 +22,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get("OriginalRoot_ROOT") or getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 CATALOG_PATH = ROOT / "src" / "catalog.json"
 STATIC_PATH = ROOT / "dist"
 DATA_PATH = Path(os.environ.get("OriginalRoot_DB_PATH", ROOT / ".data" / "OriginalRoot.sqlite3"))
@@ -1601,11 +1602,15 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         print(f"{self.command} {urlsplit(self.path).path}")
 
 
-if __name__ == "__main__":
+def main() -> None:
     host = os.environ.get("OriginalRoot_HOST", "127.0.0.1")
     port = int(os.environ.get("OriginalRoot_PORT", "8080"))
     with closing(connect_db()):
         pass
     print(f"OriginalRoot local API listening on http://{host}:{port} (online payments disabled)")
     ThreadingHTTPServer((host, port), OriginalRootHandler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()
 
