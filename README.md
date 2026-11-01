@@ -35,6 +35,8 @@ Phase 5 replaces the sample grower workspace with local grower accounts and acco
 
 Phase 6 replaces the shared operator key for routine access with named operator accounts, owner-managed staff access, and an attributable local operations history. The bootstrap key is used only for first-time owner setup. See the [Phase 6 operator workflow](docs/PHASE_6.md).
 
+Phase 7 adds local delivery requests, private delivery addresses, a customer-facing order history, and a one-time handoff code verified by an operator before delivery completion. Pickup remains available. See the [Phase 7 local delivery workflow](docs/PHASE_7.md).
+
 ## Run locally
 
 Run these commands from the project root:
@@ -95,9 +97,9 @@ Open `http://127.0.0.1:8080`. In Operations, use the key from `.env` once to cre
 - `POST /api/grower/login` and `POST /api/grower/logout` start and revoke a seven-day HTTP-only local session.
 - `GET /api/grower/me` returns the signed-in grower profile; `GET /api/grower/listings` returns only that grower's offers.
 - `POST /api/harvest-listings` requires a signed-in grower; farm name and ownership are taken from the account.
-- `POST /api/orders` requests pickup of a published offer. Quantity reservation is atomic; at least one operator account must exist. This stores the customer's name and mobile number in the local SQLite database.
-- `GET /api/orders/{reference}` returns status and pickup notes without customer contact details.
-- `GET /api/operator/orders` and `POST /api/operator/orders/{reference}/status` expose and update the pickup queue to signed-in operators.
+- `POST /api/orders` requests local delivery or pickup of a published offer. Quantity reservation is atomic; at least one operator account must exist. Delivery requests store an address and return a one-time handoff code; only its hash is stored.
+- `GET /api/orders/{reference}` returns fulfilment type, status, and customer-facing status history without contact details or delivery address.
+- `GET /api/operator/orders` exposes customer contact and delivery details to signed-in operators. `POST /api/operator/orders/{reference}/status` enforces the correct pickup or delivery lifecycle; delivery completion requires the customer handoff code.
 - `GET /api/operator/setup-status` checks whether the first owner account is needed.
 - `POST /api/operator/bootstrap` creates the first owner account with the local bootstrap key; after setup this endpoint cannot be used again.
 - `POST /api/operator/login`, `POST /api/operator/logout`, and `GET /api/operator/me` manage named operator sessions.
