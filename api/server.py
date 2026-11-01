@@ -1,8 +1,10 @@
-"""Local OriginalRoot API for harvest offers, pickup requests, and sample data."""
+"""Local OriginalRoot API for harvest offers, evidence review, fulfilment, and support."""
 
 from __future__ import annotations
 
 import json
+import base64
+import binascii
 import hashlib
 import hmac
 import mimetypes
@@ -23,8 +25,12 @@ ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "src" / "catalog.json"
 STATIC_PATH = ROOT / "dist"
 DATA_PATH = Path(os.environ.get("OriginalRoot_DB_PATH", ROOT / ".data" / "OriginalRoot.sqlite3"))
+EVIDENCE_PATH = DATA_PATH.parent / "evidence"
 ROUTE_FEE = 24
 MAX_BODY_BYTES = 16_384
+MAX_EVIDENCE_BYTES = 2_000_000
+MAX_EVIDENCE_REQUEST_BYTES = 2_750_000
+EVIDENCE_MEDIA_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 OPERATOR_TOKEN = os.environ.get("OriginalRoot_OPERATOR_TOKEN", "")
 COMMUNITIES = {"Mysuru", "Mandya", "Srirangapatna"}
 UNITS = {"kg", "500 g", "250 g", "bunch", "dozen"}
@@ -235,6 +241,36 @@ def connect_db() -> sqlite3.Connection:
             created_at TEXT NOT NULL
         )"""
     )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS harvest_evidence (
+            id TEXT PRIMARY KEY,
+            listing_id TEXT NOT NULL,
+            grower_id TEXT NOT NULL,
+            evidence_type TEXT NOT NULL,
+            caption TEXT NOT NULL,
+            media_type TEXT NOT NULL,
+            byte_size INTEGER NOT NULL,
+            sha256 TEXT NOT NULL,
+            review_status TEXT NOT NULL DEFAULT 'pending' CHECK (review_status IN ('pending', 'approved', 'declined')),
+            review_note TEXT NOT NULL DEFAULT '',
+            submitted_at TEXT NOT NULL,
+            reviewed_at TEXT,
+            reviewed_by TEXT
+        )"""
+    )
+    connection.execute("CREATE INDEX IF NOT EXISTS harvest_evidence_listing_idx ON harvest_evidence(listing_id, review_status, submitted_at DESC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS harvest_evidence_grower_idx ON harvest_evidence(grower_id, submitted_at DESC)")
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS harvest_evidence_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            evidence_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            note TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            actor_role TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
     return connection
 
 
@@ -263,14 +299,26 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json(self) -> dict:
+    def _send_evidence_file(self, content: bytes, media_type: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", media_type)
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Security-Policy", "default-src 'none'; sandbox")
+        self.send_header("Content-Disposition", "inline")
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _read_json(self, max_bytes: int = MAX_BODY_BYTES) -> dict:
         raw_length = self.headers.get("Content-Length", "0")
         try:
             length = int(raw_length)
         except ValueError as exc:
             raise ValueError("Invalid request length") from exc
-        if length < 1 or length > MAX_BODY_BYTES:
-            raise ValueError("Request body must be between 1 and 16384 bytes")
+        if length < 1 or length > max_bytes:
+            raise ValueError(f"Request body must be between 1 and {max_bytes} bytes")
         raw_body = self.rfile.read(length)
         try:
             payload = json.loads(raw_body.decode("utf-8"))
@@ -391,6 +439,29 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 rows = connection.execute("SELECT id, crop, community, available_quantity, unit, harvest_window, minimum_payout, status, approved_quantity, grade, grower_payout, buyer_price, decision_note, created_at, reviewed_at FROM harvest_listings WHERE grower_id = ? ORDER BY created_at DESC", (grower["id"],)).fetchall()
             self._send_json(200, {"listings": [dict(row) for row in rows]})
             return
+        if path == "/api/grower/evidence":
+            grower = self._grower_session()
+            if grower is None:
+                self._send_json(401, {"detail": "Sign in to view your submitted evidence"})
+                return
+            with closing(connect_db()) as connection:
+                rows = connection.execute(
+                    """SELECT e.*, l.crop FROM harvest_evidence e
+                       JOIN harvest_listings l ON l.id = e.listing_id
+                       WHERE e.grower_id = ? ORDER BY e.submitted_at DESC""",
+                    (grower["id"],),
+                ).fetchall()
+                events = connection.execute(
+                    """SELECT v.* FROM harvest_evidence_events v
+                       JOIN harvest_evidence e ON e.id = v.evidence_id
+                       WHERE e.grower_id = ? ORDER BY v.id""",
+                    (grower["id"],),
+                ).fetchall()
+            event_map: dict[str, list[dict]] = {}
+            for event in events:
+                event_map.setdefault(event["evidence_id"], []).append({"action": event["action"], "note": event["note"], "actor": event["actor"], "actor_role": event["actor_role"], "created_at": event["created_at"]})
+            self._send_json(200, {"evidence": [{**dict(row), "file_url": f"/api/evidence/{row['id']}/file", "events": event_map.get(row["id"], [])} for row in rows]})
+            return
         if path == "/api/grower/support-tickets":
             grower = self._grower_session()
             if grower is None:
@@ -474,7 +545,59 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             with closing(connect_db()) as connection:
                 rows = connection.execute("SELECT id, crop, farm_name, community, approved_quantity, unit, grade FROM harvest_listings WHERE status = 'published' ORDER BY created_at DESC").fetchall()
                 counts = {row["listing_id"]: row["count"] for row in connection.execute("SELECT listing_id, COUNT(*) AS count FROM harvest_passport_events GROUP BY listing_id").fetchall()}
-            self._send_json(200, {"listings": [{**dict(row), "event_count": counts.get(row["id"], 0)} for row in rows]})
+                evidence_counts = {row["listing_id"]: row["count"] for row in connection.execute("SELECT listing_id, COUNT(*) AS count FROM harvest_evidence WHERE review_status = 'approved' GROUP BY listing_id").fetchall()}
+            self._send_json(200, {"listings": [{**dict(row), "event_count": counts.get(row["id"], 0), "evidence_count": evidence_counts.get(row["id"], 0)} for row in rows]})
+            return
+        if path == "/api/operator/evidence":
+            if not self._operator_authorized():
+                return
+            with closing(connect_db()) as connection:
+                rows = connection.execute(
+                    """SELECT e.*, l.crop, l.farm_name, l.community, g.username AS grower_username
+                       FROM harvest_evidence e
+                       JOIN harvest_listings l ON l.id = e.listing_id
+                       JOIN growers g ON g.id = e.grower_id
+                       ORDER BY CASE WHEN e.review_status = 'pending' THEN 0 ELSE 1 END, e.submitted_at ASC"""
+                ).fetchall()
+                events = connection.execute("SELECT * FROM harvest_evidence_events ORDER BY id").fetchall()
+            event_map: dict[str, list[dict]] = {}
+            for event in events:
+                event_map.setdefault(event["evidence_id"], []).append({"action": event["action"], "note": event["note"], "actor": event["actor"], "actor_role": event["actor_role"], "created_at": event["created_at"]})
+            self._send_json(200, {"evidence": [{**dict(row), "file_url": f"/api/evidence/{row['id']}/file", "events": event_map.get(row["id"], [])} for row in rows]})
+            return
+        if path.startswith("/api/evidence/") and path.endswith("/file"):
+            evidence_id = path.removeprefix("/api/evidence/").removesuffix("/file").strip("/").upper()
+            if not re.fullmatch(r"EVD-[0-9A-F]{16}", evidence_id):
+                self._send_json(404, {"detail": "Evidence file not found"})
+                return
+            with closing(connect_db()) as connection:
+                evidence = connection.execute(
+                    """SELECT e.id, e.grower_id, e.listing_id, e.media_type, e.review_status, e.sha256, e.byte_size, l.status AS listing_status
+                       FROM harvest_evidence e JOIN harvest_listings l ON l.id = e.listing_id WHERE e.id = ?""",
+                    (evidence_id,),
+                ).fetchone()
+            if evidence is None:
+                self._send_json(404, {"detail": "Evidence file not found"})
+                return
+            permitted = evidence["review_status"] == "approved" and evidence["listing_status"] == "published"
+            if not permitted:
+                grower = self._grower_session()
+                operator = self._operator_session()
+                permitted = bool((grower and grower["id"] == evidence["grower_id"]) or operator)
+            extension = EVIDENCE_MEDIA_TYPES.get(evidence["media_type"])
+            file_path = EVIDENCE_PATH / f"{evidence_id}{extension}" if extension else None
+            if not permitted or file_path is None or not file_path.is_file():
+                self._send_json(404, {"detail": "Evidence file not found"})
+                return
+            try:
+                content = file_path.read_bytes()
+            except OSError:
+                self._send_json(404, {"detail": "Evidence file not found"})
+                return
+            if len(content) != evidence["byte_size"] or not hmac.compare_digest(hashlib.sha256(content).hexdigest(), evidence["sha256"]):
+                self._send_json(500, {"detail": "Evidence file integrity check failed"})
+                return
+            self._send_evidence_file(content, evidence["media_type"])
             return
         if path.startswith("/api/harvest-listings/") and path.endswith("/passport"):
             listing_id = path.removeprefix("/api/harvest-listings/").removesuffix("/passport").strip("/").upper()
@@ -484,11 +607,17 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             with closing(connect_db()) as connection:
                 listing = connection.execute("SELECT * FROM harvest_listings WHERE id = ? AND status = 'published'", (listing_id,)).fetchone()
                 events = connection.execute("SELECT event_type, location, detail, recorded_by, created_at FROM harvest_passport_events WHERE listing_id = ? ORDER BY rowid", (listing_id,)).fetchall()
+                evidence_rows = connection.execute(
+                    """SELECT id, evidence_type, caption, media_type, byte_size, sha256, submitted_at, reviewed_at
+                       FROM harvest_evidence WHERE listing_id = ? AND review_status = 'approved' ORDER BY reviewed_at, id""",
+                    (listing_id,),
+                ).fetchall()
             if listing is None:
                 self._send_json(404, {"detail": "Batch passport not found"})
                 return
             passport = {key: listing[key] for key in ("id", "crop", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "reviewed_at")}
-            self._send_json(200, {"passport": passport, "events": [dict(event) for event in events], "record_note": "Timeline entries are operator-recorded. OriginalRoot does not independently verify a record or its supporting evidence."})
+            published_evidence = [{**dict(item), "file_url": f"/api/evidence/{item['id']}/file", "reviewer_role": "OriginalRoot operator"} for item in evidence_rows]
+            self._send_json(200, {"passport": passport, "events": [dict(event) for event in events], "evidence": published_evidence, "record_note": "An operator reviewed the listed evidence. This review is not independent certification and cannot guarantee that every claim is accurate. Other handling notes are operator-recorded."})
             return
         if path == "/api/operator/orders":
             if not self._operator_authorized():
@@ -766,6 +895,82 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 pass
             self._send_json(200, {"status": "signed_out"}, {"Set-Cookie": self._session_cookie("", clear=True)})
             return
+        if request_path == "/api/grower/evidence":
+            grower = self._grower_session()
+            if grower is None:
+                self._send_json(401, {"detail": "Sign in before submitting batch evidence"})
+                return
+            try:
+                payload = self._read_json(max_bytes=MAX_EVIDENCE_REQUEST_BYTES)
+                listing_id = payload.get("listing_id")
+                evidence_type = payload.get("evidence_type")
+                caption = payload.get("caption")
+                media_type = payload.get("media_type")
+                encoded_file = payload.get("file_base64")
+                if not isinstance(listing_id, str) or not re.fullmatch(r"VAV-[0-9A-F]{10}", listing_id.upper()):
+                    raise ValueError("Choose one of your own valid harvest offers")
+                listing_id = listing_id.upper()
+                if not isinstance(evidence_type, str) or evidence_type not in {"field", "harvest", "weight", "grade", "packing", "other"}:
+                    raise ValueError("Choose an evidence category")
+                if not isinstance(caption, str) or not 4 <= len(caption.strip()) <= 180:
+                    raise ValueError("Describe the evidence in 4 to 180 characters")
+                if not isinstance(media_type, str) or media_type not in EVIDENCE_MEDIA_TYPES:
+                    raise ValueError("Upload a JPEG, PNG, or WebP image")
+                if not isinstance(encoded_file, str) or not encoded_file:
+                    raise ValueError("Choose an image to upload")
+                content = base64.b64decode(encoded_file, validate=True)
+                if not 1 <= len(content) <= MAX_EVIDENCE_BYTES:
+                    raise ValueError("Evidence images must be no larger than 2 MB")
+                signature_ok = (
+                    (media_type == "image/jpeg" and content.startswith(b"\xff\xd8\xff"))
+                    or (media_type == "image/png" and content.startswith(b"\x89PNG\r\n\x1a\n"))
+                    or (media_type == "image/webp" and len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP")
+                )
+                if not signature_ok:
+                    raise ValueError("The selected file does not match its image type")
+            except (ValueError, binascii.Error) as exc:
+                self._send_json(400, {"detail": str(exc) or "Evidence image could not be decoded"})
+                return
+            with closing(connect_db()) as connection:
+                listing = connection.execute(
+                    "SELECT id FROM harvest_listings WHERE id = ? AND grower_id = ? AND status IN ('pending', 'published')",
+                    (listing_id, grower["id"]),
+                ).fetchone()
+                if listing is None:
+                    self._send_json(404, {"detail": "That harvest offer is not available on your account"})
+                    return
+                evidence_id = f"EVD-{uuid.uuid4().hex[:16].upper()}"
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                sha256 = hashlib.sha256(content).hexdigest()
+                file_path = EVIDENCE_PATH / f"{evidence_id}{EVIDENCE_MEDIA_TYPES[media_type]}"
+                try:
+                    EVIDENCE_PATH.mkdir(parents=True, exist_ok=True)
+                    with file_path.open("xb") as evidence_file:
+                        evidence_file.write(content)
+                    try:
+                        os.chmod(file_path, 0o600)
+                    except OSError:
+                        pass
+                    with connection:
+                        connection.execute(
+                            """INSERT INTO harvest_evidence
+                               (id, listing_id, grower_id, evidence_type, caption, media_type, byte_size, sha256, review_status, submitted_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                            (evidence_id, listing_id, grower["id"], evidence_type, caption.strip(), media_type, len(content), sha256, now),
+                        )
+                        connection.execute(
+                            "INSERT INTO harvest_evidence_events (evidence_id, action, note, actor, actor_role, created_at) VALUES (?, 'submitted', ?, ?, 'grower', ?)",
+                            (evidence_id, caption.strip(), grower["farm_name"], now),
+                        )
+                except (OSError, sqlite3.Error):
+                    try:
+                        file_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    self._send_json(503, {"detail": "Could not safely save the evidence. Please retry."})
+                    return
+            self._send_json(201, {"id": evidence_id, "review_status": "pending", "message": "Evidence saved privately and sent for operator review."})
+            return
         if request_path == "/api/support/customer-tickets":
             try:
                 payload = self._read_json()
@@ -1036,6 +1241,52 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ticket_id": ticket_id, "status": new_status, "updated_at": now})
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
+            return
+        if request_path.startswith("/api/operator/evidence/") and request_path.endswith("/decision"):
+            if not self._operator_authorized():
+                return
+            evidence_id = request_path.removeprefix("/api/operator/evidence/").removesuffix("/decision").strip("/").upper()
+            try:
+                payload = self._read_json()
+                decision = payload.get("decision")
+                note = payload.get("note")
+                if not re.fullmatch(r"EVD-[0-9A-F]{16}", evidence_id):
+                    raise ValueError("Choose a valid evidence record")
+                if not isinstance(decision, str) or decision not in {"approved", "declined"}:
+                    raise ValueError("Choose approve or decline")
+                if not isinstance(note, str) or not 3 <= len(note.strip()) <= 500:
+                    raise ValueError("Add a 3 to 500 character review note")
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            with closing(connect_db()) as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    evidence = connection.execute("SELECT review_status FROM harvest_evidence WHERE id = ?", (evidence_id,)).fetchone()
+                    if evidence is None:
+                        connection.rollback()
+                        self._send_json(404, {"detail": "Evidence record not found"})
+                        return
+                    if evidence["review_status"] == decision:
+                        connection.rollback()
+                        self._send_json(409, {"detail": f"This evidence is already {decision}"})
+                        return
+                    connection.execute(
+                        "UPDATE harvest_evidence SET review_status = ?, review_note = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ?",
+                        (decision, note.strip(), now, self.current_operator["full_name"], evidence_id),
+                    )
+                    connection.execute(
+                        "INSERT INTO harvest_evidence_events (evidence_id, action, note, actor, actor_role, created_at) VALUES (?, ?, ?, ?, 'operator', ?)",
+                        (evidence_id, decision, note.strip(), self.current_operator["full_name"], now),
+                    )
+                    connection.commit()
+                except sqlite3.Error:
+                    connection.rollback()
+                    self._send_json(503, {"detail": "Could not save the evidence review. Please retry."})
+                    return
+            self._record_operator_audit(f"batch_evidence_{decision}", "harvest_evidence", evidence_id, note.strip())
+            self._send_json(200, {"id": evidence_id, "review_status": decision, "reviewed_at": now})
             return
         if request_path.startswith("/api/operator/harvest-listings/") and request_path.endswith("/passport-events"):
             if not self._operator_authorized():

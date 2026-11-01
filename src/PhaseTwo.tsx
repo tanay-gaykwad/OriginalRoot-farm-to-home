@@ -3,6 +3,7 @@ import { ArrowRight, BadgeCheck, CircleCheck, ClipboardCheck, KeyRound, LockKeyh
 import { PassportOperator } from "./PhaseFour";
 import { OperatorGovernance } from "./PhaseSix";
 import { CustomerSupportRequest, SupportOperations } from "./PhaseEight";
+import { EvidenceOperations } from "./PhaseNine";
 
 type HarvestListing = {
   id: string;
@@ -211,7 +212,7 @@ export function OperatorSpace({ onShop }: { onShop: () => void }) {
     setBusy(false);
   }
 
-  return <main className="grower-page operator-page"><div className="grower-top"><div className="wrap operator-intro"><div><span className="eyebrow"><span className="eyebrow-line" /> OriginalRoot operations · Phase 6</span><h1>Named operators.<br /><em>Clear responsibility.</em></h1><p>Each review and batch update is tied to an individual operator account. The first owner account is set up once with the local bootstrap key.</p><button className="text-button" onClick={onShop}>Back to the harvest board <ArrowRight size={15} /></button></div><div className="operator-callout"><ShieldCheck size={20} /><span><b>Accountable operations</b><small>Operator actions are attributed in the local operations history.</small></span></div></div></div>
+  return <main className="grower-page operator-page"><div className="grower-top"><div className="wrap operator-intro"><div><span className="eyebrow"><span className="eyebrow-line" /> OriginalRoot local operations</span><h1>Named operators.<br /><em>Clear responsibility.</em></h1><p>Each review and batch update is tied to an individual operator account. The first owner account is set up once with the local bootstrap key.</p><button className="text-button" onClick={onShop}>Back to the harvest board <ArrowRight size={15} /></button></div><div className="operator-callout"><ShieldCheck size={20} /><span><b>Accountable operations</b><small>Operator actions are attributed in the local operations history.</small></span></div></div></div>
     <div className="wrap operator-dashboard">
       {!operator ? <section className="panel operator-auth phase-six-auth"><div className="operator-auth-copy"><span className="operator-lock">{setupRequired ? <KeyRound size={18} /> : <LockKeyhole size={18} />}</span><span><b>{setupRequired ? "Set up the workspace owner" : "Operator sign in"}</b><small>{setupRequired ? "Use the local bootstrap key once to create the named owner account. The key will not be used for later reviews." : "Sign in with your personal operator username and password."}</small></span></div>
         {setupRequired && !bootstrapConfigured ? <p className="operator-price-rule">Set OriginalRoot_OPERATOR_TOKEN in the local .env file before creating the first operator account.</p> : <form onSubmit={authenticate}>{setupRequired && <><input name="full_name" aria-label="Owner name" placeholder="Owner name" required minLength={2} maxLength={80} /><input name="bootstrap_key" aria-label="Bootstrap key" type="password" placeholder="One-time bootstrap key from .env" required autoComplete="off" /></>}<input name="username" aria-label="Operator username" placeholder="Username" required minLength={3} maxLength={32} pattern="[a-zA-Z0-9_.-]{3,32}" autoComplete="username" /><input name="password" aria-label="Operator password" type="password" placeholder={setupRequired ? "Create a password (12+ characters)" : "Password"} required minLength={setupRequired ? 12 : 1} maxLength={128} autoComplete={setupRequired ? "new-password" : "current-password"} /><button className="button button-dark" type="submit" disabled={busy}>{busy ? "Please wait…" : setupRequired ? "Create owner account" : "Sign in"}</button></form>}
@@ -222,8 +223,9 @@ export function OperatorSpace({ onShop }: { onShop: () => void }) {
         {connected && <OperatorOrderQueue />}
         {connected && <SupportOperations />}
         {connected && <PassportOperator />}
+        {connected && <EvidenceOperations />}
         {connected && <OperatorGovernance isOwner={operator.role === "owner"} />}
-        <div className="operator-release-note"><CircleCheck size={16} /><span><b>Phase 6 boundary</b><small>Account-specific access and an attributable local activity history are enabled. These records are not tamper-proof, and the service remains local-only.</small></span></div>
+        <div className="operator-release-note"><CircleCheck size={16} /><span><b>Local operations boundary</b><small>Access is account-specific and activity is attributed in a local history. The records are not tamper-proof, and this service remains local-only.</small></span></div>
       </>}
       {error && <div className="operator-error" role="alert">{error}</div>}
     </div>

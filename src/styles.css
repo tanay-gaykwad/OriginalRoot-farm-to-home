@@ -68,3 +68,40 @@
 .support-timeline p { margin: 1px 0 0; color: #627160; font-size: 10px; line-height: 1.45; }
 .support-empty { margin: 0; padding: 16px; color: #859181; font-size: 11px; text-align: center; }
 @media(max-width:650px){.support-update-form{grid-template-columns:1fr}.support-track-form .form-two{grid-template-columns:1fr}.support-panel,.support-operations{padding:14px}}
+
+.evidence-panel,.evidence-operations{display:grid;gap:14px;margin-top:22px;padding:20px}
+.evidence-upload-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;padding:14px;border:1px solid #e8ebe3;border-radius:5px;background:#fbfcf9}
+.evidence-upload-form label,.evidence-review-form label{display:grid;gap:5px;color:#697b69;font-size:9px;font-weight:700}
+.evidence-upload-form input,.evidence-upload-form select,.evidence-review-form select,.evidence-review-form textarea{width:100%;min-width:0;padding:9px;border:1px solid #e1e6dd;border-radius:4px;background:#fff;color:#3d5140;font:400 10px Manrope,sans-serif}
+.evidence-upload-form input[type=file]{padding:7px;background:#fff}
+.evidence-upload-form .checkout-button{grid-column:1/-1;margin-top:0}
+.evidence-note{display:flex;align-items:flex-start;gap:7px;margin:0;color:#788475;font-size:9px;line-height:1.55}
+.evidence-note svg{flex:none;color:#678361}
+.evidence-list{display:grid;gap:10px}
+.evidence-list>article{display:grid;gap:9px;padding:13px;border:1px solid #e8ebe3;border-radius:5px;background:#fff}
+.evidence-list-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.evidence-list-heading>span:first-child{display:grid;gap:4px;min-width:0}
+.evidence-list-heading b{color:#455d45;font-size:11px}
+.evidence-list-heading small,.evidence-list>article>small{color:#899488;font-size:8px;line-height:1.5;overflow-wrap:anywhere}
+.evidence-list>article>p{margin:0;color:#647361;font-size:10px;line-height:1.5}
+.evidence-list>article>a:not(.evidence-image-link){color:#4f754d;font-size:9px;font-weight:700;text-decoration:underline}
+.evidence-review-note{padding:9px;border-left:2px solid #c8d7bf;background:#fafbf8}
+.evidence-image-link{display:block;width:min(100%,560px);max-height:360px;overflow:hidden;border:1px solid #e8ebe3;border-radius:4px;background:#f6f7f3}
+.evidence-image-link img{display:block;width:100%;max-height:360px;object-fit:contain}
+.evidence-integrity{display:flex;flex-wrap:wrap;gap:8px 18px;color:#879184;font-size:8px}
+.evidence-integrity span{display:grid;gap:3px;min-width:110px}
+.evidence-integrity b{max-width:480px;color:#5b6a58;font-weight:500;overflow-wrap:anywhere}
+.evidence-review-form{display:grid;grid-template-columns:minmax(150px,.7fr) minmax(200px,1.5fr) auto;align-items:end;gap:10px;padding-top:12px;border-top:1px solid #edf0e9}
+.evidence-review-form textarea{resize:vertical}
+.evidence-review-form button{white-space:nowrap}
+.evidence-history{display:grid;gap:4px;padding-top:7px;border-top:1px solid #f0f1ed}
+.evidence-history small{color:#828d80;font-size:8px;line-height:1.5}
+.passport-evidence-item{display:grid;grid-template-columns:160px minmax(0,1fr);gap:12px;padding:10px;border:1px solid #e8ebe3;border-radius:4px;background:#fff}
+.passport-evidence-item>a{display:block;overflow:hidden;border-radius:3px;background:#f2f4ee}
+.passport-evidence-item img{display:block;width:100%;height:120px;object-fit:cover}
+.passport-evidence-item>div{display:grid;align-content:start;gap:5px;min-width:0}
+.passport-evidence-item b{color:#455d45;font-size:10px}
+.passport-evidence-item p{margin:0;color:#647361;font-size:9px;line-height:1.5}
+.passport-evidence-item small{color:#899488;font-size:8px;line-height:1.5;overflow-wrap:anywhere}
+@media(max-width:740px){.evidence-review-form{grid-template-columns:1fr}.evidence-review-form button{justify-self:start}}
+@media(max-width:560px){.evidence-panel,.evidence-operations{padding:14px}.evidence-upload-form{grid-template-columns:1fr;padding:11px}.evidence-upload-form .checkout-button{grid-column:auto}.passport-evidence-item{grid-template-columns:1fr}.passport-evidence-item img{height:180px}}

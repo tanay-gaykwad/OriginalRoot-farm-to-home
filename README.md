@@ -34,6 +34,7 @@ The GitHub Pages site is a static preview with fictional farms, listings, harves
 - Submit a grower harvest offer with an explicit minimum payout, review it in the operator console, and publish only after entering the confirmed grade and full price split.
 - Show operator-approved offers on the customer harvest board when the frontend is connected to the local API.
 - Report order concerns, submit grower grievances, and record operator follow-up in the Phase 8 support workflow.
+- Submit harvest evidence from a grower account, review it in Operations, and show approved evidence on the public batch passport.
 
 ## Phase 1 product direction
 
@@ -52,6 +53,8 @@ Phase 6 replaces the shared operator key for routine access with named operator 
 Phase 7 adds local delivery requests, private delivery addresses, a customer-facing order history, and a one-time handoff code verified by an operator before delivery completion. Pickup remains available. See the [Phase 7 local delivery workflow](docs/PHASE_7.md).
 
 Phase 8 adds customer order complaints, grower grievances, private ticket lookup, operator investigation and resolution timelines, and an attributable audit record. Refund and replacement choices are requests for review only; no money or replacement is processed. Support workflows require the local Docker/API deployment and are not active on the static GitHub Pages preview. See the [Phase 8 customer and grower support workflow](docs/PHASE_8.md).
+
+Phase 9 adds private grower image submissions for a batch, operator evidence review, checksum-checked local file storage, and approved evidence on the public batch passport. Operator review is not independent certification. See the [Phase 9 evidence workflow](docs/PHASE_9.md).
 
 ## Run locally
 
@@ -110,6 +113,10 @@ For a first-use walkthrough of offers, delivery, and support, see the [Phase 8 o
 - `POST /api/operator/harvest-listings/{id}/decision` approves or declines a pending offer. Approval checks that grower payout is at least the stated floor and calculates the customer price from the four visible price components. Requires an operator session.
 - `GET /api/harvest-listings/{id}/passport` returns the public batch record for an approved offer, including its price split and recorded checkpoints.
 - `GET /api/operator/passports` lists published batches for a signed-in operator.
+- `GET|POST /api/grower/evidence` lists or submits image evidence for the signed-in grower's own pending or published offer.
+- `GET /api/operator/evidence` lists batch evidence for signed-in operator review.
+- `POST /api/operator/evidence/{evidence_id}/decision` approves, declines, or withdraws approval with a review note and attributed history.
+- `GET /api/evidence/{evidence_id}/file` serves an image publicly only after approval and publication; its stored size and SHA-256 checksum are checked.
 - `POST /api/operator/harvest-listings/{id}/passport-events` appends a harvest, weighing, grading, packing, or handoff checkpoint and records the operator's name.
 - `POST /api/grower/register` creates a local grower profile; passwords must have at least 12 characters.
 - `POST /api/grower/login` and `POST /api/grower/logout` start and revoke a seven-day HTTP-only local session.

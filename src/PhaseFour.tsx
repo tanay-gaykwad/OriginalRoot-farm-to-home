@@ -3,9 +3,11 @@ import { ArrowRight, Clipboard, QrCode, ShieldCheck, X } from "lucide-react";
 import type { PublishedOffer } from "./PhaseTwo";
 
 type PassportEvent = { event_type: string; location: string; detail: string; recorded_by: string; created_at: string };
-type PassportRecord = { passport: PublishedOffer & { reviewed_at: string }; events: PassportEvent[]; record_note: string };
-type OperatorBatch = { id: string; crop: string; farm_name: string; community: string; approved_quantity: number; unit: string; grade: string; event_count: number };
+type PassportEvidence = { id: string; evidence_type: string; caption: string; media_type: string; byte_size: number; sha256: string; submitted_at: string; reviewed_at: string; reviewer_role: string; file_url: string };
+type PassportRecord = { passport: PublishedOffer & { reviewed_at: string }; events: PassportEvent[]; evidence: PassportEvidence[]; record_note: string };
+type OperatorBatch = { id: string; crop: string; farm_name: string; community: string; approved_quantity: number; unit: string; grade: string; event_count: number; evidence_count: number };
 const eventNames: Record<string, string> = { harvested: "Harvest recorded", weighed: "Weight recorded", graded: "Grade recorded", packed: "Packing recorded", handed_off: "Handoff recorded" };
+const evidenceNames: Record<string, string> = { field: "Field or farm", harvest: "Harvest", weight: "Weighing", grade: "Grading", packing: "Packing", other: "Other batch record" };
 
 const money = (value: number) => `₹${new Intl.NumberFormat("en-IN").format(value)}`;
 
@@ -41,6 +43,7 @@ export function BatchPassportModal({ listing, onClose }: { listing: PublishedOff
         <div className="passport-batch-facts"><span>Approved quantity<b>{batch.approved_quantity} {batch.unit}</b></span><span>Harvest window<b>{batch.harvest_window}</b></span><span>Operator review<b>{new Date(batch.reviewed_at).toLocaleString("en-IN")}</b></span></div>
         <div className="passport-price-lines"><b>Price per {batch.unit}</b><span>Grower payout <strong>{money(batch.grower_payout)}</strong></span><span>Sorting & packing <strong>{money(batch.packing_cost)}</strong></span><span>Coordination <strong>{money(batch.platform_fee)}</strong></span><span>Route cost <strong>{money(batch.route_cost)}</strong></span><span className="passport-price-total">Customer price <strong>{money(batch.buyer_price)}</strong></span></div>
         <div className="passport-events"><h3>Recorded checkpoints <small>{record?.events.length || 0}</small></h3>{record?.events.length ? record.events.map((item, index) => <article className="passport-event" key={`${item.created_at}-${index}`}><span className="passport-event-dot" /><div><b>{eventNames[item.event_type] || item.event_type}</b><small>{new Date(item.created_at).toLocaleString("en-IN")}{item.location ? ` · ${item.location}` : ""}</small><p>{item.detail}</p><small>Entered by {item.recorded_by}</small></div></article>) : <p className="passport-empty">No handling checkpoints have been added to this batch yet.</p>}</div>
+        <div className="passport-events passport-evidence"><h3><ShieldCheck size={15} /> Operator-reviewed evidence <small>{record?.evidence.length || 0}</small></h3>{record?.evidence.length ? record.evidence.map((item) => <article className="passport-evidence-item" key={item.id}><a href={item.file_url} target="_blank" rel="noreferrer"><img src={item.file_url} alt={`${evidenceNames[item.evidence_type] || "Batch"} evidence`} loading="lazy" /></a><div><b>{evidenceNames[item.evidence_type] || item.evidence_type}</b><p>{item.caption}</p><small>Reviewed by {item.reviewer_role} · {new Date(item.reviewed_at).toLocaleString("en-IN")}</small><small>SHA-256 · {item.sha256}</small></div></article>) : <p className="passport-empty">No evidence has been approved for this batch. The listed details and handling checkpoints are recorded claims.</p>}</div>
         <div className="passport-record-note"><ShieldCheck size={16} /><span>{record?.record_note}</span></div>
         <button type="button" className="passport-copy-link" onClick={copyLink}><Clipboard size={15} /> {copied ? "Link copied" : "Copy batch record link"} <ArrowRight size={14} /></button>
       </>}
