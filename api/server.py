@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import hmac
 import mimetypes
 import os
 import re
+import secrets
 import sqlite3
 import uuid
+from http.cookies import SimpleCookie
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -95,6 +98,28 @@ def connect_db() -> sqlite3.Connection:
             reviewed_at TEXT
         )"""
     )
+    listing_columns = {row["name"] for row in connection.execute("PRAGMA table_info(harvest_listings)")}
+    if "grower_id" not in listing_columns:
+        connection.execute("ALTER TABLE harvest_listings ADD COLUMN grower_id TEXT")
+    connection.execute("CREATE INDEX IF NOT EXISTS harvest_listings_grower_id_idx ON harvest_listings(grower_id, created_at DESC)")
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS growers (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            farm_name TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            password_salt TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS grower_sessions (
+            token_hash TEXT PRIMARY KEY,
+            grower_id TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
     connection.execute(
         """CREATE TABLE IF NOT EXISTS harvest_orders (
             reference TEXT PRIMARY KEY,
@@ -156,9 +181,11 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'")
         self.send_header("X-Frame-Options", "DENY")
 
-    def _send_json(self, status: int, payload: object) -> None:
+    def _send_json(self, status: int, payload: object, extra_headers: dict[str, str] | None = None) -> None:
         body = json_bytes(payload)
         self._headers(status)
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -191,6 +218,42 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _grower_session(self) -> sqlite3.Row | None:
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+            morsel = cookie.get("OriginalRoot_session")
+            if morsel is None:
+                return None
+            token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            with closing(connect_db()) as connection:
+                return connection.execute(
+                    """SELECT growers.id, growers.username, growers.farm_name, growers.created_at
+                       FROM grower_sessions JOIN growers ON growers.id = grower_sessions.grower_id
+                       WHERE grower_sessions.token_hash = ? AND grower_sessions.expires_at > ?""",
+                    (token_hash, now),
+                ).fetchone()
+        except (sqlite3.Error, ValueError):
+            return None
+
+    @staticmethod
+    def _session_cookie(token: str, *, clear: bool = False) -> str:
+        secure = "; Secure" if os.environ.get("OriginalRoot_COOKIE_SECURE") == "1" else ""
+        if clear:
+            return f"OriginalRoot_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict{secure}"
+        return f"OriginalRoot_session={token}; Path=/; Max-Age=604800; HttpOnly; SameSite=Strict{secure}"
+
+    @staticmethod
+    def _password_hash(password: str, salt_hex: str) -> str:
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), 600_000, dklen=32)
+        return digest.hex()
+
+    @staticmethod
+    def _session_token() -> tuple[str, str]:
+        token = secrets.token_urlsafe(32)
+        return token, hashlib.sha256(token.encode("utf-8")).hexdigest()
+
     @staticmethod
     def _listing_payload(row: sqlite3.Row) -> dict:
         return {key: row[key] for key in row.keys()}
@@ -199,6 +262,22 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path == "/api/health":
             self._send_json(200, {"status": "ok", "mode": "local-pilot", "operator_review_enabled": bool(OPERATOR_TOKEN), "order_requests_enabled": bool(OPERATOR_TOKEN), "payments_enabled": False})
+            return
+        if path == "/api/grower/me":
+            grower = self._grower_session()
+            if grower is None:
+                self._send_json(401, {"detail": "Sign in to your grower workspace"})
+                return
+            self._send_json(200, {"grower": {"id": grower["id"], "username": grower["username"], "farm_name": grower["farm_name"]}})
+            return
+        if path == "/api/grower/listings":
+            grower = self._grower_session()
+            if grower is None:
+                self._send_json(401, {"detail": "Sign in to view your harvest offers"})
+                return
+            with closing(connect_db()) as connection:
+                rows = connection.execute("SELECT id, crop, community, available_quantity, unit, harvest_window, minimum_payout, status, approved_quantity, grade, grower_payout, buyer_price, decision_note, created_at, reviewed_at FROM harvest_listings WHERE grower_id = ? ORDER BY created_at DESC", (grower["id"],)).fetchall()
+            self._send_json(200, {"listings": [dict(row) for row in rows]})
             return
         if path == "/api/products":
             self._send_json(200, {"mode": "sample-data", "products": CATALOG})
@@ -323,6 +402,72 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         request_path = urlsplit(self.path).path
+        if request_path == "/api/grower/register":
+            try:
+                payload = self._read_json()
+                farm_name = payload.get("farm_name")
+                username = payload.get("username")
+                password = payload.get("password")
+                if not isinstance(farm_name, str) or not 2 <= len(farm_name.strip()) <= 80:
+                    raise ValueError("Farm or collective name must be 2 to 80 characters")
+                if not isinstance(username, str) or not re.fullmatch(r"[a-zA-Z0-9_.-]{3,32}", username):
+                    raise ValueError("Username must be 3 to 32 letters, numbers, dots, dashes, or underscores")
+                if not isinstance(password, str) or not 12 <= len(password) <= 128:
+                    raise ValueError("Password must be 12 to 128 characters")
+                username = username.lower()
+                salt = secrets.token_hex(16)
+                password_hash = self._password_hash(password, salt)
+                grower_id = uuid.uuid4().hex
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                token, token_hash = self._session_token()
+                with closing(connect_db()) as connection, connection:
+                    connection.execute("DELETE FROM grower_sessions WHERE expires_at <= ?", (now,))
+                    connection.execute("INSERT INTO growers (id, username, farm_name, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?, ?, ?)", (grower_id, username, farm_name.strip(), password_hash, salt, now))
+                    connection.execute("INSERT INTO grower_sessions (token_hash, grower_id, expires_at, created_at) VALUES (?, ?, ?, ?)", (token_hash, grower_id, (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(timespec="seconds"), now))
+            except sqlite3.IntegrityError:
+                self._send_json(409, {"detail": "That username is already in use"})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            self._send_json(201, {"grower": {"id": grower_id, "username": username, "farm_name": farm_name.strip()}}, {"Set-Cookie": self._session_cookie(token)})
+            return
+        if request_path == "/api/grower/login":
+            try:
+                payload = self._read_json()
+                username = payload.get("username")
+                password = payload.get("password")
+                if not isinstance(username, str) or not isinstance(password, str) or len(username) > 32 or len(password) > 128:
+                    raise ValueError("Enter a valid username and password")
+                with closing(connect_db()) as connection:
+                    account = connection.execute("SELECT id, username, farm_name, password_hash, password_salt FROM growers WHERE username = ?", (username.lower(),)).fetchone()
+                supplied_hash = self._password_hash(password, account["password_salt"] if account else "00" * 16)
+                if account is None or not hmac.compare_digest(supplied_hash, account["password_hash"]):
+                    self._send_json(401, {"detail": "Username or password is incorrect"})
+                    return
+                now = datetime.now(timezone.utc)
+                token, token_hash = self._session_token()
+                with closing(connect_db()) as connection, connection:
+                    connection.execute("DELETE FROM grower_sessions WHERE expires_at <= ?", (now.isoformat(timespec="seconds"),))
+                    connection.execute("INSERT INTO grower_sessions (token_hash, grower_id, expires_at, created_at) VALUES (?, ?, ?, ?)", (token_hash, account["id"], (now + timedelta(days=7)).isoformat(timespec="seconds"), now.isoformat(timespec="seconds")))
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            self._send_json(200, {"grower": {"id": account["id"], "username": account["username"], "farm_name": account["farm_name"]}}, {"Set-Cookie": self._session_cookie(token)})
+            return
+        if request_path == "/api/grower/logout":
+            cookie = SimpleCookie()
+            try:
+                cookie.load(self.headers.get("Cookie", ""))
+                morsel = cookie.get("OriginalRoot_session")
+                if morsel:
+                    token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
+                    with closing(connect_db()) as connection, connection:
+                        connection.execute("DELETE FROM grower_sessions WHERE token_hash = ?", (token_hash,))
+            except (sqlite3.Error, ValueError):
+                pass
+            self._send_json(200, {"status": "signed_out"}, {"Set-Cookie": self._session_cookie("", clear=True)})
+            return
         if request_path == "/api/orders":
             if not OPERATOR_TOKEN:
                 self._send_json(503, {"detail": "Order requests are disabled until a local operator key is configured"})
@@ -530,10 +675,13 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"detail": str(exc)})
             return
         if request_path == "/api/harvest-listings":
+            grower = self._grower_session()
+            if grower is None:
+                self._send_json(401, {"detail": "Sign in before submitting a harvest offer"})
+                return
             try:
                 payload = self._read_json()
                 crop = payload.get("crop")
-                farm_name = payload.get("farm_name")
                 community = payload.get("community")
                 quantity = payload.get("available_quantity")
                 unit = payload.get("unit")
@@ -541,8 +689,6 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 minimum_payout = payload.get("minimum_payout")
                 if not isinstance(crop, str) or not 2 <= len(crop.strip()) <= 60:
                     raise ValueError("Crop name must be 2 to 60 characters")
-                if not isinstance(farm_name, str) or not 2 <= len(farm_name.strip()) <= 80:
-                    raise ValueError("Farm or collective name must be 2 to 80 characters")
                 if not isinstance(community, str) or community not in COMMUNITIES:
                     raise ValueError("Choose a supported pilot community")
                 if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 100_000:
@@ -560,9 +706,9 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             with closing(connect_db()) as connection, connection:
                 connection.execute(
                     """INSERT INTO harvest_listings
-                       (id, crop, farm_name, community, available_quantity, unit, harvest_window, minimum_payout, status, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
-                    (listing_id, crop.strip(), farm_name.strip(), community, quantity, unit, harvest_window, minimum_payout, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+                       (id, grower_id, crop, farm_name, community, available_quantity, unit, harvest_window, minimum_payout, status, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                    (listing_id, grower["id"], crop.strip(), grower["farm_name"], community, quantity, unit, harvest_window, minimum_payout, datetime.now(timezone.utc).isoformat(timespec="seconds")),
                 )
                 row = connection.execute("SELECT * FROM harvest_listings WHERE id = ?", (listing_id,)).fetchone()
             self._send_json(201, {"listing": self._listing_payload(row), "message": "Offer submitted for review. It is not public until the grower-approved terms are confirmed."})
