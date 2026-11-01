@@ -1,12 +1,25 @@
 # OriginalRoot
 
-OriginalRoot is an interactive preview of a farmer-led produce network. It brings together a customer shop, harvest traceability, transparent price breakdowns, and a grower workspace.
+OriginalRoot is a locally hosted farmer-to-home marketplace workflow for growers, customers, and the people coordinating orders. It connects grower harvest offers to customer orders, records batch checkpoints and price splits, and includes local delivery, account workspaces, and support handling. It is designed to help a small team trial one supply corridor before taking on a public launch.
 
-## Public preview
+[![Build](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/build.yml)
+[![Pages preview](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/pages.yml/badge.svg?branch=main)](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/pages.yml)
 
-[OriginalRoot on GitHub Pages](https://tanay-gaykwad.github.io/originalroot-farm-to-home/)
+## See it working
 
-The preview uses fictional farms, listings, harvest records, prices, and grower figures. It does not verify farms or food safety, contact farmers, reserve produce, process payments, or arrange delivery. There is no live marketplace service behind this site. Do not enter real customer, farmer, address, bank, or payment information.
+Open the [public OriginalRoot preview](https://tanay-gaykwad.github.io/originalroot-farm-to-home/) to browse the sample customer experience without installing anything. Try searching the harvest board, opening a Farm Passport, and viewing the illustrative price split. The preview uses fictional data and does not connect to the local database or API.
+
+To try the working local workflows, start OriginalRoot with Docker Compose using the steps below. The customer preview, grower accounts, operator review, order tracking, and support queue then share a local SQLite database.
+
+## Who it is for
+
+- **Growers:** submit harvest offers with a stated minimum payout and track offer review.
+- **Customers:** browse approved offers, request pickup or local delivery, track an order, and raise an order concern.
+- **Local operators:** review offers, coordinate fulfilment, record batch checkpoints, and respond to customer or grower support tickets.
+
+## Current scope
+
+The GitHub Pages site is a static preview with fictional farms, listings, harvest records, prices, and grower figures. The Docker app includes a local API and SQLite persistence for offers, accounts, orders, delivery handoffs, and support tickets. Neither version integrates payment providers, SMS, or a driver network. The application does not independently verify farmer identity, farm claims, produce quality, or food safety. Keep the Docker service on loopback and use fictional data until production identity, privacy, food-handling, payment, and security controls are in place.
 
 ## What you can explore
 
@@ -20,6 +33,7 @@ The preview uses fictional farms, listings, harvest records, prices, and grower 
 - Submit an anonymous crop-demand signal for a nearby community. With the local API, only aggregate counts by crop and community are exposed; on GitHub Pages the signal stays in the visitor's browser.
 - Submit a grower harvest offer with an explicit minimum payout, review it in the operator console, and publish only after entering the confirmed grade and full price split.
 - Show operator-approved offers on the customer harvest board when the frontend is connected to the local API.
+- Report order concerns, submit grower grievances, and record operator follow-up in the Phase 8 support workflow.
 
 ## Phase 1 product direction
 
@@ -82,6 +96,8 @@ docker compose ps
 
 Open `http://127.0.0.1:8080`. In Operations, use the key from `.env` once to create the owner account, then sign in with that account. The owner can provision named operator accounts; the bootstrap key is not used for normal reviews. App data is stored in the `OriginalRoot-data` Docker volume. The app is available only on this computer; the published container port is bound to loopback. Stop it with `docker compose down`; use `docker compose down -v` only if you intend to erase its database volume.
 
+For a first-use walkthrough of offers, delivery, and support, see the [Phase 8 operating guide](docs/PHASE_8.md) and the earlier [phase guides](docs/).
+
 ## Local API
 
 - `GET /api/health` reports local pilot mode, whether operator review is configured, and that payments are disabled.
@@ -108,6 +124,11 @@ Open `http://127.0.0.1:8080`. In Operations, use the key from `.env` once to cre
 - `POST /api/operator/password` changes the signed-in operator's password and revokes its other sessions.
 - `GET /api/operator/users` and `POST /api/operator/users` let the owner view and create operator accounts.
 - `GET /api/operator/audit` returns the latest 100 attributed operations events.
+- `POST /api/support/customer-tickets` submits a concern for an existing order after matching its checkout phone number.
+- `POST /api/support/customer-ticket-status` looks up a customer ticket after matching the order phone number.
+- `GET|POST /api/grower/support-tickets` lists or creates grievances for the signed-in grower.
+- `GET /api/operator/support-tickets` lists support requests for signed-in operators.
+- `POST /api/operator/support-tickets/{ticket_id}/status` records an operator update and allowed status transition.
 - `POST /api/demo/orders` records a non-personal sample order. The request body contains only product IDs and quantities.
 - `GET /api/demo/orders/{reference}` retrieves that sample order and its price breakdown.
 
@@ -139,4 +160,10 @@ Replace sample data with field-verified records; add authenticated farmer, custo
 ## License
 
 OriginalRoot's original project code is released under the MIT License. Third-party dependencies retain their own licenses.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, change expectations, and the pull request process. Report vulnerabilities privately using the instructions in [SECURITY.md](SECURITY.md). Please do not publish secrets, personal farmer or customer information, or exploitable security details in a public issue.
+
+Automated checks build the frontend and compile-check the Python API on pushes and pull requests. The Pages workflow separately builds and publishes the static preview from `main`. These checks cover build correctness, not field readiness or operational claims.
 

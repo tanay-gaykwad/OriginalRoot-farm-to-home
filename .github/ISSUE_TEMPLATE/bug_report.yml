@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a reproducible problem in OriginalRoot
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: Do not include real customer or farmer information, addresses, credentials, or payment details. Report vulnerabilities privately using SECURITY.md.
+  - type: textarea
+    id: context
+    attributes:
+      label: Where did it happen?
+      description: Page or workflow, browser, operating system, and whether you used GitHub Pages or local Docker.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: 1. Open ... 2. Select ... 3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshot or non-sensitive logs
+      description: Use fictional data and remove identifiers or secrets.
