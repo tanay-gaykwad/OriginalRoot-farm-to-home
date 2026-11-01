@@ -137,9 +137,13 @@ def connect_db() -> sqlite3.Connection:
             role TEXT NOT NULL CHECK (role IN ('owner', 'operator')),
             password_hash TEXT NOT NULL,
             password_salt TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1
         )"""
     )
+    operator_columns = {row["name"] for row in connection.execute("PRAGMA table_info(operator_users)")}
+    if "is_active" not in operator_columns:
+        connection.execute("ALTER TABLE operator_users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
     connection.execute(
         """CREATE TABLE IF NOT EXISTS operator_sessions (
             token_hash TEXT PRIMARY KEY,
@@ -349,7 +353,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 return connection.execute(
                     """SELECT operator_users.id, operator_users.username, operator_users.full_name, operator_users.role
                        FROM operator_sessions JOIN operator_users ON operator_users.id = operator_sessions.operator_id
-                       WHERE operator_sessions.token_hash = ? AND operator_sessions.expires_at > ?""",
+                       WHERE operator_sessions.token_hash = ? AND operator_sessions.expires_at > ? AND operator_users.is_active = 1""",
                     (token_hash, now),
                 ).fetchone()
         except (sqlite3.Error, ValueError):
@@ -358,7 +362,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
     @staticmethod
     def _operator_account_exists() -> bool:
         with closing(connect_db()) as connection:
-            return connection.execute("SELECT 1 FROM operator_users LIMIT 1").fetchone() is not None
+            return connection.execute("SELECT 1 FROM operator_users WHERE is_active = 1 LIMIT 1").fetchone() is not None
 
     def _operator_is_owner(self) -> bool:
         if getattr(self, "current_operator", None) and self.current_operator["role"] == "owner":
@@ -502,7 +506,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             if not self._operator_authorized() or not self._operator_is_owner():
                 return
             with closing(connect_db()) as connection:
-                users = connection.execute("SELECT id, username, full_name, role, created_at FROM operator_users ORDER BY created_at").fetchall()
+                users = connection.execute("SELECT id, username, full_name, role, created_at, is_active FROM operator_users ORDER BY created_at").fetchall()
             self._send_json(200, {"operators": [dict(row) for row in users]})
             return
         if path == "/api/operator/audit":
@@ -738,7 +742,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 if not isinstance(username, str) or not isinstance(password, str) or len(username) > 32 or len(password) > 128:
                     raise ValueError("Enter a valid username and password")
                 with closing(connect_db()) as connection:
-                    operator = connection.execute("SELECT id, username, full_name, role, password_hash, password_salt FROM operator_users WHERE username = ?", (username.lower(),)).fetchone()
+                    operator = connection.execute("SELECT id, username, full_name, role, password_hash, password_salt FROM operator_users WHERE username = ? AND is_active = 1", (username.lower(),)).fetchone()
                 supplied_hash = self._password_hash(password, operator["password_salt"] if operator else "00" * 16)
                 if operator is None or not hmac.compare_digest(supplied_hash, operator["password_hash"]):
                     self._send_json(401, {"detail": "Username or password is incorrect"})
@@ -828,6 +832,53 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"detail": str(exc)})
                 return
             self._send_json(201, {"operator": {"id": operator_id, "username": username, "full_name": full_name.strip(), "role": "operator", "created_at": now}})
+            return
+        if request_path.startswith("/api/operator/users/") and request_path.endswith("/status"):
+            if not self._operator_authorized() or not self._operator_is_owner():
+                return
+            operator_id = request_path.removeprefix("/api/operator/users/").removesuffix("/status").strip("/").lower()
+            try:
+                payload = self._read_json()
+                is_active = payload.get("is_active")
+                if not re.fullmatch(r"[0-9a-f]{32}", operator_id):
+                    raise ValueError("Choose a valid operator account")
+                if not isinstance(is_active, bool):
+                    raise ValueError("Choose whether the operator account should be active")
+                if operator_id == self.current_operator["id"]:
+                    raise ValueError("You cannot disable your own owner account")
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                with closing(connect_db()) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    user = connection.execute("SELECT id, username, role, is_active FROM operator_users WHERE id = ?", (operator_id,)).fetchone()
+                    if user is None:
+                        connection.rollback()
+                        self._send_json(404, {"detail": "Operator account not found"})
+                        return
+                    if user["role"] != "operator":
+                        connection.rollback()
+                        self._send_json(409, {"detail": "Owner accounts cannot be suspended here"})
+                        return
+                    if bool(user["is_active"]) == is_active:
+                        connection.rollback()
+                        self._send_json(200, {"id": operator_id, "is_active": is_active, "changed": False})
+                        return
+                    connection.execute("UPDATE operator_users SET is_active = ? WHERE id = ?", (int(is_active), operator_id))
+                    if not is_active:
+                        connection.execute("DELETE FROM operator_sessions WHERE operator_id = ?", (operator_id,))
+                    action = "operator_reactivated" if is_active else "operator_suspended"
+                    detail = f"{'Reactivated' if is_active else 'Suspended'} operator @{user['username']}"
+                    connection.execute(
+                        "INSERT INTO operator_audit (operator_id, operator_name, action, entity_type, entity_id, detail, created_at) VALUES (?, ?, ?, 'operator', ?, ?, ?)",
+                        (self.current_operator["id"], self.current_operator["full_name"], action, operator_id, detail, now),
+                    )
+                    connection.commit()
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            except sqlite3.Error:
+                self._send_json(503, {"detail": "Could not update the operator account. Please retry."})
+                return
+            self._send_json(200, {"id": operator_id, "is_active": is_active, "changed": True, "updated_at": now})
             return
         if request_path == "/api/grower/register":
             try:

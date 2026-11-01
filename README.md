@@ -56,6 +56,8 @@ Phase 8 adds customer order complaints, grower grievances, private ticket lookup
 
 Phase 9 adds private grower image submissions for a batch, operator evidence review, checksum-checked local file storage, and approved evidence on the public batch passport. Operator review is not independent certification. See the [Phase 9 evidence workflow](docs/PHASE_9.md).
 
+Phase 10 adds owner-controlled operator suspension and reactivation, session revocation, verified database-and-evidence backup bundles, and a careful restore command. See the [Phase 10 operations guide](docs/PHASE_10.md) and the [local pilot runbook](docs/PILOT_RUNBOOK.md).
+
 ## Run locally
 
 Run these commands from the project root:
@@ -130,6 +132,7 @@ For a first-use walkthrough of offers, delivery, and support, see the [Phase 8 o
 - `POST /api/operator/login`, `POST /api/operator/logout`, and `GET /api/operator/me` manage named operator sessions.
 - `POST /api/operator/password` changes the signed-in operator's password and revokes its other sessions.
 - `GET /api/operator/users` and `POST /api/operator/users` let the owner view and create operator accounts.
+- `POST /api/operator/users/{id}/status` lets the owner suspend or reactivate an operator; suspension revokes all of that operator's sessions.
 - `GET /api/operator/audit` returns the latest 100 attributed operations events.
 - `POST /api/support/customer-tickets` submits a concern for an existing order after matching its checkout phone number.
 - `POST /api/support/customer-ticket-status` looks up a customer ticket after matching the order phone number.
@@ -139,7 +142,7 @@ For a first-use walkthrough of offers, delivery, and support, see the [Phase 8 o
 - `POST /api/demo/orders` records a non-personal sample order. The request body contains only product IDs and quantities.
 - `GET /api/demo/orders/{reference}` retrieves that sample order and its price breakdown.
 
-The API binds to `127.0.0.1` by default. Named operator sessions protect review and order-management endpoints; the bootstrap key is limited to first-owner setup. Local sessions and the audit history are not a production identity, recovery, backup, or tamper-proof audit service. Do not expose this server to the internet. The GitHub Pages site hosts the frontend only, has no shared API, and disables account-based operations.
+The API binds to `127.0.0.1` by default. Named operator sessions protect review and order-management endpoints; the bootstrap key is limited to first-owner setup. `python api/backup.py create`, `verify`, and `restore` manage local data bundles; backups are manual, unencrypted, and must be copied to protected storage outside the Docker volume. Local sessions and the audit history are not a production identity, recovery, remote backup, or tamper-proof audit service. Do not expose this server to the internet. The GitHub Pages site hosts the frontend only, has no shared API, and disables account-based operations.
 
 ## Product direction
 
@@ -152,7 +155,7 @@ The API binds to `127.0.0.1` by default. Named operator sessions protect review 
 
 ## Before a live pilot
 
-Replace sample data with field-verified records; add authenticated farmer, customer, operator, and administrator roles; establish grade and rejection standards with evidence and appeals; add secure payment-provider integration; define food-safety, privacy, complaint, refund, retention, and backup procedures; and review applicable state and food-business requirements. Validate the real unit economics in one crop corridor before expanding.
+Use the [local pilot runbook](docs/PILOT_RUNBOOK.md) before inviting participants. A public service still requires a secured hosted backend, identity and account-recovery controls, protected scheduled off-host backups, a retention and deletion process, tested field and food-handling procedures, a complaint and refund policy, and applicable legal and business review. Validate the real unit economics in one crop corridor before expanding.
 
 ## Technology
 

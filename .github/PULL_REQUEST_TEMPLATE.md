@@ -9,7 +9,8 @@
 ## Checks completed
 
 - [ ] `pnpm build`
-- [ ] `python -m py_compile api/server.py` (when API code changes)
+- [ ] `python -m py_compile api/server.py api/backup.py` (when Python code changes)
+- [ ] `docker compose build` (when container packaging changes)
 - [ ] `pnpm build:pages` (when frontend or deployment config changes)
 - [ ] Updated relevant docs
 - [ ] Screenshots use fictional data and contain no secrets

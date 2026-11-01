@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Activity, UserPlus } from "lucide-react";
 
-type OperatorUser = { id: string; username: string; full_name: string; role: string; created_at: string };
+type OperatorUser = { id: string; username: string; full_name: string; role: string; created_at: string; is_active: number };
 type AuditEntry = { operator_name: string; action: string; entity_type: string; entity_id: string; detail: string; created_at: string };
 
 export function OperatorGovernance({ isOwner }: { isOwner: boolean }) {
@@ -55,11 +55,23 @@ export function OperatorGovernance({ isOwner }: { isOwner: boolean }) {
     setBusy(false);
   }
 
+  async function changeOperatorStatus(user: OperatorUser) {
+    const isActive = !Boolean(user.is_active);
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`/api/operator/users/${encodeURIComponent(user.id)}/status`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_active: isActive }) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || "Could not update this operator account.");
+      setNotice(isActive ? "Operator account reactivated. They must sign in again." : "Operator suspended and all existing sessions revoked."); await refresh();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not update this operator account."); }
+    setBusy(false);
+  }
+
   return <section className="phase-six-governance panel">
     <div className="operator-queue-heading"><div><span className="eyebrow">Phase 6 · Accountable operations</span><h2>Operations history <small>{events.length}</small></h2></div><span className="status-pill status-moving"><Activity size={12} /> Attributed actions</span></div>
     {error && <div className="operator-error" role="alert">{error}</div>}{notice && <div className="phase-five-notice">{notice}</div>}
     <form className="phase-six-password" onSubmit={changePassword}><div><b>Change your password</b><small>Changing it revokes your other active sessions.</small></div><label>Current password<input name="current_password" type="password" required autoComplete="current-password" /></label><label>New password<input name="new_password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" /></label><button className="subtle-button" type="submit" disabled={busy}>Update password</button></form>
-    {isOwner && <div className="phase-six-users"><div><h3>Operator accounts <small>{operators.length}</small></h3><p>Named accounts make each review and handling update attributable.</p></div><div className="phase-six-user-list">{operators.map((user) => <article key={user.id}><span><b>{user.full_name}</b><small>@{user.username} · {user.role}</small></span><small>{new Date(user.created_at).toLocaleDateString("en-IN")}</small></article>)}</div><form className="phase-six-add-operator" onSubmit={createOperator}><label>Operator name<input name="full_name" required minLength={2} maxLength={80} /></label><label>Username<input name="username" required minLength={3} maxLength={32} pattern="[a-zA-Z0-9_.-]{3,32}" /></label><label>Temporary password<input name="password" required type="password" minLength={12} maxLength={128} autoComplete="new-password" /></label><button className="button button-dark" type="submit" disabled={busy}><UserPlus size={14} /> {busy ? "Creating…" : "Add operator"}</button></form><p className="phase-six-note">Share temporary credentials directly with the operator; they should change them through the local account administration process before broader use. Password change and account suspension are not available yet.</p></div>}
+    {isOwner && <div className="phase-six-users"><div><h3>Operator accounts <small>{operators.length}</small></h3><p>Named accounts make each review and handling update attributable.</p></div><div className="phase-six-user-list">{operators.map((user) => <article key={user.id}><span><b>{user.full_name}</b><small>@{user.username} · {user.role} · {Boolean(user.is_active) ? "Active" : "Suspended"}</small></span><div className="phase-six-user-actions"><small>{new Date(user.created_at).toLocaleDateString("en-IN")}</small>{user.role === "operator" && <button className="subtle-button" type="button" disabled={busy} onClick={() => changeOperatorStatus(user)}>{Boolean(user.is_active) ? "Suspend" : "Reactivate"}</button>}</div></article>)}</div><form className="phase-six-add-operator" onSubmit={createOperator}><label>Operator name<input name="full_name" required minLength={2} maxLength={80} /></label><label>Username<input name="username" required minLength={3} maxLength={32} pattern="[a-zA-Z0-9_.-]{3,32}" /></label><label>Temporary password<input name="password" required type="password" minLength={12} maxLength={128} autoComplete="new-password" /></label><button className="button button-dark" type="submit" disabled={busy}><UserPlus size={14} /> {busy ? "Creating…" : "Add operator"}</button></form><p className="phase-six-note">Suspending an operator revokes existing sessions. Reactivated operators must sign in again.</p></div>}
     <div className="phase-six-audit-list">{events.length ? events.map((item, index) => <article key={`${item.created_at}-${index}`}><span className="phase-six-audit-dot" /><div><b>{item.action.replace(/_/g, " ")}</b><small>{item.operator_name} · {item.entity_type} {item.entity_id} · {new Date(item.created_at).toLocaleString("en-IN")}</small><p>{item.detail}</p></div></article>) : <div className="passport-empty">Operator decisions and handling changes will appear here.</div>}</div>
     <p className="phase-six-note">This is an application-level history in the local database. It is not tamper-proof, externally backed up, or a substitute for a production audit service.</p>
   </section>;

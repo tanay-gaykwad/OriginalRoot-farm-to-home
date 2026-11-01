@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .data/
+OriginalRoot-backups/
 .venv/
 __pycache__/
 *.py[cod]
