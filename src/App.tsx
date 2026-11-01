@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   ArrowRight,
   BadgeCheck,
@@ -10,15 +10,10 @@ import {
   MapPin,
   MapPinned,
   Menu,
-  Minus,
-  Plus,
   QrCode,
-  Search,
   ShieldCheck,
-  ShoppingBag,
   Sprout,
   Truck,
-  UsersRound,
   WalletCards,
   X,
 } from "lucide-react";
@@ -51,30 +46,10 @@ type Product = {
 
 const products = productCatalog as Product[];
 
-type Cart = Record<string, number>;
 type ModalState = { type: "trace"; product: Product } | { type: "demand" } | { type: "order"; listing: PublishedOffer } | { type: "passport"; listing: PublishedOffer } | { type: "track" } | null;
-const money = (n: number) => `₹${new Intl.NumberFormat("en-IN").format(n)}`;
 
 function Logo({ compact = false }: { compact?: boolean }) {
   return <a className={`brand ${compact ? "brand-compact" : ""}`} href="#top" aria-label="OriginalRoot home"><span className="brand-symbol"><Leaf size={19} strokeWidth={2.4} /></span><span className="brand-name">OriginalRoot<span>.</span></span></a>;
-}
-
-function ProductCard({ product, quantity, onAdd, onTrace }: { product: Product; quantity: number; onAdd: () => void; onTrace: () => void }) {
-  return (
-    <article className="product-card">
-      <button className={`product-art art-${product.color}`} onClick={onTrace} aria-label={`Open ${product.name} Farm Passport`}>
-        <span className="art-orbit" /><span className="product-emoji">{product.emoji}</span>
-        <span className="harvest-tag"><span className="fresh-dot" /> Picked {product.harvest.toLowerCase().startsWith("today") ? "today" : "recently"}</span>
-        <span className="passport-corner"><QrCode size={15} /></span>
-      </button>
-      <div className="product-copy">
-        <div className="product-label">{product.variety}</div>
-        <div className="product-title-row"><h3>{product.name}</h3><span className="grade-mark"><BadgeCheck size={14} /> {product.grade.split(" · ")[0]}</span></div>
-        <button className="farm-link" onClick={onTrace}><MapPin size={13} /> {product.farm} <span>· {product.location.split(",")[0]}</span></button>
-        <div className="product-bottom"><div><strong>{money(product.price)}</strong><span className="unit"> / {product.unit}</span></div><button className={`add-button ${quantity ? "added" : ""}`} onClick={onAdd} aria-label={`Add ${product.name} to bag`}>{quantity ? <><Check size={15} /> {quantity} in bag</> : <><Plus size={16} /> Add</>}</button></div>
-      </div>
-    </article>
-  );
 }
 
 type Workspace = "shop" | "grower" | "operator";
@@ -90,7 +65,6 @@ function isPlatformRoute(): boolean {
 }
 
 function MarketplaceApp() {
-  const [cart, setCart] = useState<Cart>(() => JSON.parse(localStorage.getItem("OriginalRoot-cart") || "{}"));
   const [mode, setModeState] = useState<Workspace>(currentWorkspace);
   function setMode(next: Workspace) {
     setModeState(next);
@@ -99,85 +73,46 @@ function MarketplaceApp() {
     url.searchParams.set("workspace", next);
     window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
   }
-  const [category, setCategory] = useState("Everything");
-  const [query, setQuery] = useState("");
-  const [cartOpen, setCartOpen] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [notice, setNotice] = useState("");
-  const [ordered, setOrdered] = useState(false);
-  const [placingOrder, setPlacingOrder] = useState(false);
-  const [orderConfirmation, setOrderConfirmation] = useState("");
   const [mobileNav, setMobileNav] = useState(false);
   const [demandSaved, setDemandSaved] = useState(false);
   const [demandLocation, setDemandLocation] = useState<"shared" | "local" | "">("");
   const [publishedOffers, setPublishedOffers] = useState<PublishedOffer[]>([]);
   const [orderRequestsAvailable, setOrderRequestsAvailable] = useState(false);
+  const [marketStatus, setMarketStatus] = useState<"loading" | "connected" | "offline">("loading");
 
-  useEffect(() => { localStorage.setItem("OriginalRoot-cart", JSON.stringify(cart)); }, [cart]);
   useEffect(() => {
     const syncWorkspace = () => setModeState(currentWorkspace());
     window.addEventListener("popstate", syncWorkspace);
     return () => window.removeEventListener("popstate", syncWorkspace);
   }, []);
-  useEffect(() => { fetch("/api/harvest-listings").then((response) => response.ok ? response.json() : null).then((result) => {
-    const listings: PublishedOffer[] = result?.listings || [];
-    setPublishedOffers(listings);
-    const sharedPassport = new URLSearchParams(window.location.search).get("passport");
-    const listing = listings.find((offer) => offer.id === sharedPassport);
-    if (listing) setModal({ type: "passport", listing });
-  }).catch(() => setPublishedOffers([])); }, []);
+  async function loadPublishedOffers() {
+    setMarketStatus("loading");
+    try {
+      const response = await fetch("/api/harvest-listings");
+      if (!response.ok) throw new Error("Marketplace service unavailable");
+      const result = await response.json();
+      const listings: PublishedOffer[] = result?.listings || [];
+      setPublishedOffers(listings);
+      setMarketStatus("connected");
+      const sharedPassport = new URLSearchParams(window.location.search).get("passport");
+      const listing = listings.find((offer) => offer.id === sharedPassport);
+      if (listing) setModal({ type: "passport", listing });
+    } catch {
+      setPublishedOffers([]);
+      setMarketStatus("offline");
+    }
+  }
+  useEffect(() => { void loadPublishedOffers(); }, []);
   useEffect(() => { fetch("/api/health").then((response) => response.ok ? response.json() : null).then((result) => setOrderRequestsAvailable(Boolean(result?.order_requests_enabled))).catch(() => setOrderRequestsAvailable(false)); }, []);
   useEffect(() => { if (!notice) return; const id = window.setTimeout(() => setNotice(""), 2600); return () => window.clearTimeout(id); }, [notice]);
 
-  const cartCount = Object.values(cart).reduce((sum, n) => sum + n, 0);
-  const subtotal = products.reduce((sum, p) => sum + p.price * (cart[p.id] || 0), 0);
-  const delivery = cartCount ? 24 : 0;
-  const total = subtotal + delivery;
-  const farmerTotal = products.reduce((sum, p) => sum + p.received * (cart[p.id] || 0), 0);
-  const packingTotal = products.reduce((sum, p) => sum + p.pack * (cart[p.id] || 0), 0);
-  const platformTotal = products.reduce((sum, p) => sum + p.platform * (cart[p.id] || 0), 0);
-  const visibleProducts = useMemo(() => products.filter((p) => (category === "Everything" || p.category === category) && `${p.name} ${p.farm} ${p.location}`.toLowerCase().includes(query.toLowerCase())), [category, query]);
   function showShop() {
     setMode("shop");
-    fetch("/api/harvest-listings").then((response) => response.ok ? response.json() : null).then((result) => setPublishedOffers(result?.listings || [])).catch(() => setPublishedOffers([]));
+    void loadPublishedOffers();
   }
 
-  function add(product: Product, amount = 1) {
-    if (amount > 0 && (cart[product.id] || 0) >= product.stock) {
-      setNotice(`Only ${product.stock} sample units are listed for ${product.name}.`);
-      return;
-    }
-    setCart((old) => ({ ...old, [product.id]: Math.max(0, (old[product.id] || 0) + amount) }));
-    setOrdered(false);
-    setNotice(`${product.name} ${amount > 0 ? "added to" : "updated in"} your bag`);
-  }
-  async function checkout() {
-    if (placingOrder || cartCount === 0) return;
-    setPlacingOrder(true);
-    const items = Object.entries(cart).filter(([, quantity]) => quantity > 0).map(([productId, quantity]) => ({ product_id: productId, quantity }));
-    let confirmation = "";
-    try {
-      const response = await fetch("/api/demo/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok && response.status >= 500) throw new TypeError("The local order service is unavailable.");
-      if (!response.ok) throw new Error(result.detail || "The sample order could not be recorded.");
-      confirmation = `${result.reference} · recorded in the local sample ledger`;
-    } catch (error) {
-      if (error instanceof Error && error.message !== "Failed to fetch" && error.name !== "TypeError") {
-        setNotice(error.message);
-        setPlacingOrder(false);
-        return;
-      }
-      confirmation = `LOCAL-${Date.now().toString().slice(-6)} · kept in this browser only`;
-    }
-    setPlacingOrder(false);
-    setOrderConfirmation(confirmation);
-    setCart({}); setOrdered(true); setCartOpen(false); setNotice("Sample order recorded. No payment was taken and no produce was reserved.");
-  }
   async function submitDemand(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -217,7 +152,7 @@ function MarketplaceApp() {
             <button className={mode === "operator" ? "nav-active" : ""} onClick={() => { setMode("operator"); setMobileNav(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Operations</button>
             <button onClick={() => { setModal({ type: "track" }); setMobileNav(false); }}>Track order</button>
           </div>
-          <div className="header-actions"><button className="icon-button account-button" onClick={() => setMode(mode === "shop" ? "grower" : "shop")} title="Switch view"><UsersRound size={18} /></button><button className="bag-button" onClick={() => setCartOpen(true)}><ShoppingBag size={17} /><span>Your bag</span>{cartCount > 0 && <b>{cartCount}</b>}</button><button className="mobile-menu" onClick={() => setMobileNav(!mobileNav)} aria-label="Toggle navigation">{mobileNav ? <X /> : <Menu />}</button></div>
+          <div className="header-actions"><button className="mobile-menu" onClick={() => setMobileNav(!mobileNav)} aria-label="Toggle navigation">{mobileNav ? <X /> : <Menu />}</button></div>
         </div>
       </header>
 
@@ -231,13 +166,9 @@ function MarketplaceApp() {
           <section className="trust-strip"><div className="wrap trust-inner"><div><ShieldCheck size={19} /><span><b>Known origin</b><small>Farmer and batch details</small></span></div><div><ClipboardCheck size={19} /><span><b>Clear quality</b><small>Grades with a real standard</small></span></div><div><WalletCards size={19} /><span><b>Open pricing</b><small>See the price split</small></span></div><div><Truck size={19} /><span><b>Careful delivery</b><small>Grouped local routes</small></span></div></div></section>
 
           <section className="harvest-section wrap" id="the-harvest">
-            <div className="section-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> Fresh from the farms</div><h2>This week’s <em>harvest</em></h2><p>Illustrative seasonal listings for Mysuru and nearby homes.</p></div><button className="season-note" onClick={() => setNotice("Seasonal availability changes with each harvest.")}><span className="season-icon"><Sprout size={16} /></span><span><b>In season, right now</b><small>Available around Mysuru</small></span><ArrowRight size={15} /></button></div>
-            <PublishedHarvests listings={publishedOffers} canOrder={orderRequestsAvailable} onOrder={(listing) => setModal({ type: "order", listing })} onPassport={(listing) => setModal({ type: "passport", listing })} />
+            <div className="section-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> Local marketplace</div><h2>Grower-approved <em>harvests</em></h2><p>Only current offers from the connected local OriginalRoot service can be requested.</p></div></div>
+            {marketStatus === "loading" ? <div className="approved-empty"><span>⏳</span><div><b>Connecting to the local marketplace…</b><small>Checking for current, reviewed grower offers.</small></div></div> : marketStatus === "offline" ? <div className="approved-empty"><span>🔌</span><div><b>The marketplace service is not connected.</b><small>GitHub Pages is an information site without shared data. Start the local Docker app to use the shared marketplace and order-request service.</small><button className="text-button" onClick={() => void loadPublishedOffers()}>Try again <ArrowRight size={14} /></button></div></div> : <PublishedHarvests listings={publishedOffers} canOrder={orderRequestsAvailable} onOrder={(listing) => setModal({ type: "order", listing })} onPassport={(listing) => setModal({ type: "passport", listing })} />}
             <div className="demand-banner"><div><span className="demand-banner-icon"><Sprout size={18} /></span><span><b>Help growers plan the next harvest</b><small>Share what your household would buy. No name, phone, payment, or commitment needed.</small></span></div><button className="button button-dark" onClick={() => { setDemandSaved(false); setDemandLocation(""); setModal({ type: "demand" }); }}>Add a demand signal <ArrowRight size={15} /></button></div>
-        <div className="catalog-tools"><div className="category-tabs">{["Everything", "Vegetables", "Fruit", "Greens", "Pantry"].map((item) => <button key={item} className={category === item ? "tab-selected" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div><label className="search-box"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find something good..." /></label></div>
-            <div className="product-grid">{visibleProducts.map((product) => <ProductCard key={product.id} product={product} quantity={cart[product.id] || 0} onAdd={() => add(product)} onTrace={() => setModal({ type: "trace", product })} />)}</div>
-            {visibleProducts.length === 0 && <div className="empty-search"><span>🌱</span><b>Nothing in this patch yet.</b><small>Try another search or browse the full harvest.</small><button onClick={() => { setCategory("Everything"); setQuery(""); }}>Clear filters</button></div>}
-            <div className="harvest-footnote"><Leaf size={15} /><span>Harvests are small on purpose. When a batch is gone, it comes back with the next picking.</span></div>
           </section>
 
           <section className="how-section" id="how-it-works"><div className="wrap how-wrap"><div className="how-intro"><div className="eyebrow"><span className="eyebrow-line" /> A simpler path to your plate</div><h2>Closer to the grower.<br /><em>Clearer</em> by the kilo.</h2><p>OriginalRoot coordinates the useful work between the farm and your door—and shows you what happened along the way.</p><button className="text-button" onClick={() => setModal({ type: "trace", product: products[0] })}>See a sample Farm Passport <ArrowRight size={15} /></button></div><div className="steps-grid"><div className="step-card"><span className="step-no">01</span><span className="step-icon"><Sprout size={20} /></span><h3>Meet the grower</h3><p>Every listing names the farmer or collective and where the crop comes from.</p><span className="step-detail"><MapPinned size={14} /> Farm and batch linked</span></div><div className="step-card"><span className="step-no">02</span><span className="step-icon"><ClipboardCheck size={20} /></span><h3>Know the grade</h3><p>Clear handling notes and honest grading. Cosmetic seconds can have a place, too.</p><span className="step-detail"><BadgeCheck size={14} /> No vague quality claims</span></div><div className="step-card"><span className="step-no">03</span><span className="step-icon"><WalletCards size={20} /></span><h3>See the split</h3><p>Understand the farmer’s share and the cost of packing and delivery.</p><span className="step-detail"><QrCode size={14} /> Scan the Farm Passport</span></div></div></div></section>
@@ -247,7 +178,6 @@ function MarketplaceApp() {
         <footer className="site-footer"><div className="wrap footer-top"><div><Logo /><p>Good food has a real starting point.<br />We’re making it easier to see.</p></div><div className="footer-links"><a href="#the-harvest">Browse harvest</a><a href={(() => { const url = new URL(window.location.href); url.search = ""; url.hash = ""; return url.pathname; })()}>About OriginalRoot</a><button onClick={() => setMode("grower")}>Grow with OriginalRoot</button><button onClick={() => setModal({ type: "track" })}>Track an order</button></div><div className="footer-location"><span className="fresh-dot" /> Local focus <b>Mysuru & nearby</b><small>Example catalog; live listings require local review</small></div></div><div className="wrap footer-bottom"><span>© 2026 OriginalRoot · A local-first food network</span><span>Clear records. Fair terms. No scarcity games.</span><button onClick={() => setNotice("The local API supports grower offers, review, orders, support, and delivery handoffs. Payments are not enabled; GitHub Pages has no shared database.")}>Data & service note</button></div></footer>
       </> : mode === "grower" ? <GrowerWorkspace onShop={showShop} /> : <OperatorSpace onShop={showShop} />}
 
-      {cartOpen && <div className="drawer-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setCartOpen(false); }}><aside className="cart-drawer"><div className="drawer-head"><div><span className="eyebrow">Your basket</span><h2>{cartCount ? `${cartCount} good ${cartCount === 1 ? "thing" : "things"}` : "Room for something fresh?"}</h2></div><button className="icon-button" onClick={() => setCartOpen(false)} aria-label="Close bag"><X size={19} /></button></div>{ordered && <div className="order-success"><CircleCheck size={20} /><span><b>Sample order recorded.</b><small>{orderConfirmation}</small><small>No payment was taken; no produce was reserved.</small></span></div>}{cartCount === 0 ? <div className="empty-bag"><span>🧺</span><p>Your bag is waiting for this week’s harvest.</p><button className="button button-dark" onClick={() => { setCartOpen(false); document.getElementById("the-harvest")?.scrollIntoView({ behavior: "smooth" }); }}>Browse the harvest <ArrowRight size={15} /></button></div> : <><div className="cart-items">{products.filter((p) => cart[p.id]).map((product) => <div className="cart-line" key={product.id}><span className={`cart-thumb art-${product.color}`}>{product.emoji}</span><div className="cart-line-main"><b>{product.name}</b><small>{money(product.price)} / {product.unit}</small><button className="cart-trace-link" onClick={() => setModal({ type: "trace", product })}><QrCode size={12} /> Meet this batch</button></div><div className="qty-control"><button onClick={() => add(product, -1)} aria-label="Remove one"><Minus size={12} /></button><span>{cart[product.id]}</span><button onClick={() => add(product)} aria-label="Add one"><Plus size={12} /></button></div></div>)}</div><div className="price-waterfall"><div className="waterfall-title"><span>Where your money goes</span><span>Per order</span></div><div><span>Growers receive</span><b>{money(farmerTotal)}</b></div><div><span>Sorting & packing</span><b>{money(packingTotal)}</b></div><div><span>OriginalRoot coordination</span><b>{money(platformTotal)}</b></div><div><span>Local delivery</span><b>{money(delivery)}</b></div><div className="waterfall-total"><span>You pay</span><b>{money(total)}</b></div><small>Illustrative price split. Actual prices depend on crop, batch, and route.</small></div><button className="checkout-button" onClick={checkout} disabled={placingOrder}><span>{placingOrder ? "Recording sample order…" : "Continue to checkout"}</span><b>{money(total)} <ArrowRight size={16} /></b></button><div className="drawer-assurance"><ShieldCheck size={15} /> No payment is collected in this prototype.</div></>}</aside></div>}
 
       {modal?.type === "trace" && <div className="modal-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setModal(null); }}><section className="passport-modal"><button className="modal-close icon-button" onClick={() => setModal(null)} aria-label="Close"><X size={19} /></button><div className={`passport-cover art-${modal.product.color}`}><span className="passport-kicker"><QrCode size={15} /> OriginalRoot FARM PASSPORT</span><span className="passport-emoji">{modal.product.emoji}</span><span className="passport-batch">BATCH {modal.product.batch}</span></div><div className="passport-content"><div className="passport-title-row"><div><span className="eyebrow">A little more about your food</span><h2>{modal.product.name}</h2><p>{modal.product.variety}</p></div><span className="grade-pill"><BadgeCheck size={14} /> {modal.product.grade}</span></div><div className="grower-card"><span className="grower-avatar">{modal.product.farm.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase()}</span><span><b>{modal.product.farm}</b><small><MapPin size={12} /> {modal.product.location}</small></span><span className="verified-chip"><ShieldCheck size={13} /> Sample profile</span></div><div className="trace-timeline"><div className="timeline-item complete"><span><Check size={12} /></span><div><b>Picked at the farm</b><small>{modal.product.harvest}</small></div></div><div className="timeline-item complete"><span><Check size={12} /></span><div><b>Weighed and graded</b><small>Collection point · {modal.product.grade}</small></div></div><div className="timeline-item complete"><span><Check size={12} /></span><div><b>Packed for the local route</b><small>Batch {modal.product.batch}</small></div></div><div className="timeline-item upcoming"><span><Truck size={12} /></span><div><b>Delivered to your neighbourhood</b><small>Route grouped to reduce extra trips</small></div></div></div><div className="passport-note"><ShieldCheck size={16} /><span><b>What this proves</b><small>These example records illustrate batch details. A real Farm Passport needs field checks and operator records.</small></span></div></div></section></div>}
 
@@ -259,7 +189,6 @@ function MarketplaceApp() {
       {modal?.type === "track" && <OrderTrackingModal onClose={() => setModal(null)} />}
 
       {notice && <div className="toast"><CircleCheck size={17} /><span>{notice}</span><button onClick={() => setNotice("")} aria-label="Dismiss"><X size={14} /></button></div>}
-      <button className="floating-bag" onClick={() => setCartOpen(true)}><ShoppingBag size={17} /> Bag {cartCount > 0 && <b>{cartCount}</b>}</button>
     </div>
   );
 }

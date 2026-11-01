@@ -9,7 +9,7 @@ OriginalRoot is a locally hosted farmer-to-home marketplace workflow for growers
 
 Open the [OriginalRoot website](https://tanay-gaykwad.github.io/originalroot-farm-to-home/) to learn about the brand and its approach. Choose **Explore OriginalRoot** to enter the marketplace workspace, or open the local platform with Docker or the desktop installer for shared local data and API workflows.
 
-To try the working local workflows, start OriginalRoot with Docker Compose using the steps below. The customer preview, grower accounts, operator review, order tracking, and support queue then share a local SQLite database.
+To try the working local workflows, start OriginalRoot with Docker Compose using the steps below. The marketplace, grower accounts, operator review, order tracking, and support queue then share a local SQLite database.
 
 For a Windows desktop installer, download the latest `OriginalRoot-Setup` `.exe` from [GitHub Releases](https://github.com/tanay-gaykwad/originalroot-farm-to-home/releases). It installs a local desktop app that starts its API on loopback and stores its database in the current Windows user's app data. On first launch, copy the generated one-time key and use it in Operations to create the owner account. The installer is not code-signed, so Windows may show an unknown-publisher warning or a managed device may block it.
 
@@ -23,15 +23,13 @@ Read the [Windows installer guide](docs/DESKTOP_INSTALLER.md) for setup, first o
 
 ## Current scope
 
-The public homepage is the OriginalRoot brand introduction. The platform app is available through its **Explore OriginalRoot** action and at `/?platform=1`; its marketplace, grower, and operations workspaces have distinct shareable URLs. GitHub Pages has static example data and no shared API or database. The Docker and Windows desktop apps use a local API and SQLite database for grower offers and accounts, operator review, orders, delivery handoffs, batch records, and support tickets. The local service does not integrate payments, SMS, or a driver network and must remain bound to loopback. Current data and workflow limitations are in [Phase 11 and the remaining launch roadmap](docs/PHASE_11.md).
+The public homepage is the OriginalRoot brand introduction. The platform app is available through its **Explore OriginalRoot** action and at `/?platform=1`; its marketplace, grower, and operations workspaces have distinct shareable URLs. GitHub Pages has no shared API or database and reports that boundary in the marketplace. Docker and the Windows desktop app use a local API and SQLite database for grower offers and accounts, operator review, real order requests, delivery handoffs, batch records, and support tickets. The customer workspace only requests current, operator-approved grower offers; it has no online payment, SMS, or driver network. Keep the local service bound to loopback. See the [Phase 11 launch roadmap](docs/PHASE_11.md) and [Phase 12 marketplace boundary](docs/PHASE_12.md).
 
 ## What you can explore
 
-- Browse, search, and filter the example harvest.
-- Open a sample Farm Passport with batch and handling details.
-- Add produce to a basket and inspect an illustrative price breakdown.
-- Record a non-personal sample order locally; the API validates product IDs and quantities and calculates totals from the shared catalog.
-- Look up a sample order reference through the local API.
+- Browse only grower offers published after local operator review, with quantity, grade, and price breakdown visible.
+- Request pickup or local delivery from an approved offer; orders reserve real offer quantity and await operator confirmation. No payment is taken.
+- Track an order by its reference through the local API.
 - Switch to the grower workspace and save a harvest-listing draft in the browser.
 - Run the combined static site and local order API with Docker Compose.
 - Submit an anonymous crop-demand signal for a nearby community. With the local API, only aggregate counts by crop and community are exposed; on GitHub Pages the signal stays in the visitor's browser.
@@ -63,6 +61,8 @@ Phase 9 adds private grower image submissions for a batch, operator evidence rev
 Phase 10 adds owner-controlled operator suspension and reactivation, session revocation, verified database-and-evidence backup bundles, and a careful restore command. See the [Phase 10 operations guide](docs/PHASE_10.md) and the [local pilot runbook](docs/PILOT_RUNBOOK.md).
 
 Phase 11 separates the OriginalRoot brand introduction from the marketplace, grower, and operator workspaces. It also records what must be built and validated before a controlled pilot or public customer launch. See the [Phase 11 structure and launch roadmap](docs/PHASE_11.md).
+
+Phase 12 removes the browser-only sample basket and checkout path. The customer marketplace now uses reviewed offers from the connected API and distinguishes an empty market from a disconnected service. See the [Phase 12 marketplace boundary](docs/PHASE_12.md).
 
 ## Run locally
 

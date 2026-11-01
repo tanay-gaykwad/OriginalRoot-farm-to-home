@@ -24,7 +24,10 @@ export type PublishedOffer = {
 const money = (value: number) => `₹${new Intl.NumberFormat("en-IN").format(value)}`;
 
 export function PublishedHarvests({ listings, canOrder, onOrder, onPassport }: { listings: PublishedOffer[]; canOrder: boolean; onOrder: (listing: PublishedOffer) => void; onPassport: (listing: PublishedOffer) => void }) {
-  if (!listings.length) return null;
+  if (!listings.length) return <section className="approved-harvests">
+    <div className="section-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> Grower-approved offers</div><h2>Available <em>harvests</em></h2><p>Only reviewed offers with current stock appear here.</p></div></div>
+    <div className="approved-empty"><span>🌱</span><div><b>No approved harvests are available yet.</b><small>When a grower offer passes local review, its quantity, grade, price breakdown, and order request will appear here.</small></div></div>
+  </section>;
   return <section className="approved-harvests">
     <div className="section-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> Grower-approved offers</div><h2>Available <em>harvests</em></h2><p>Each offer has been reviewed and its price split is visible.</p></div></div>
     <div className="approved-grid">{listings.map((listing) => <article className="approved-card" key={listing.id}>

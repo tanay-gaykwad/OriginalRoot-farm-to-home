@@ -23,7 +23,7 @@ Do not invite the general public to place real orders until the platform has a h
 
 ## Remaining roadmap
 
-1. **Phase 12 — Operational app shell:** turn the three role workspaces into clear, direct routes with persistent navigation, account state, and task-focused pages. Remove browser-only sample checkout fallbacks from the working app.
+1. **Phase 12 — Operational app shell (complete):** the customer marketplace now reads approved offers from the connected API, distinguishes empty from offline states, and no longer offers a browser-only sample checkout. See [Phase 12](PHASE_12.md).
 2. **Phase 13 — Product and inventory system:** move crops, categories, grades, units, and stock from the static example catalog into operator-managed records. Support fresh produce and grains/pulses in the same catalog while allowing crop-specific grade and storage rules.
 3. **Phase 14 — Customer identity and order lifecycle:** add customer profiles and order history or a secure guest-order alternative, reliable cancellation, refunds, and account recovery.
 4. **Phase 15 — Production data foundation:** add database migrations, a managed hosted database, private object storage for evidence, automated encrypted off-site backups, monitoring, and environment-based secret management.
