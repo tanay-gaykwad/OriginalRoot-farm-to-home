@@ -1,4 +1,4 @@
-"""Local OriginalRoot pilot API for sample orders and anonymous harvest demand signals."""
+"""Local OriginalRoot API for harvest offers, pickup requests, and sample data."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import hmac
 import mimetypes
 import os
+import re
 import sqlite3
 import uuid
 from contextlib import closing
@@ -94,6 +95,37 @@ def connect_db() -> sqlite3.Connection:
             reviewed_at TEXT
         )"""
     )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS harvest_orders (
+            reference TEXT PRIMARY KEY,
+            listing_id TEXT NOT NULL,
+            crop TEXT NOT NULL,
+            farm_name TEXT NOT NULL,
+            customer_name TEXT NOT NULL,
+            customer_phone TEXT NOT NULL,
+            community TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            unit TEXT NOT NULL,
+            grower_payout INTEGER NOT NULL,
+            packing_cost INTEGER NOT NULL,
+            platform_fee INTEGER NOT NULL,
+            route_cost INTEGER NOT NULL,
+            total INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS harvest_order_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_reference TEXT NOT NULL,
+            from_status TEXT,
+            to_status TEXT NOT NULL,
+            note TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
     return connection
 
 
@@ -155,7 +187,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = urlsplit(self.path).path
         if path == "/api/health":
-            self._send_json(200, {"status": "ok", "mode": "local-pilot", "operator_review_enabled": bool(OPERATOR_TOKEN), "payments_enabled": False})
+            self._send_json(200, {"status": "ok", "mode": "local-pilot", "operator_review_enabled": bool(OPERATOR_TOKEN), "order_requests_enabled": bool(OPERATOR_TOKEN), "payments_enabled": False})
             return
         if path == "/api/products":
             self._send_json(200, {"mode": "sample-data", "products": CATALOG})
@@ -168,6 +200,53 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 ).fetchall()
             self._send_json(200, {"mode": "local-pilot", "signals": [dict(row) for row in rows]})
             return
+        if path == "/api/operator/orders":
+            if not self._operator_authorized():
+                return
+            with closing(connect_db()) as connection:
+                rows = connection.execute("SELECT * FROM harvest_orders ORDER BY created_at DESC").fetchall()
+                events = connection.execute("SELECT * FROM harvest_order_events ORDER BY id").fetchall()
+            event_map: dict[str, list[dict]] = {}
+            for event in events:
+                event_map.setdefault(event["order_reference"], []).append({"from_status": event["from_status"], "to_status": event["to_status"], "note": event["note"], "created_at": event["created_at"]})
+            self._send_json(200, {"orders": [{**dict(row), "events": event_map.get(row["reference"], [])} for row in rows]})
+            return
+        if path.startswith("/api/orders/"):
+            reference = path.removeprefix("/api/orders/").upper()
+            if not re.fullmatch(r"VAV-[0-9A-F]{16}", reference):
+                self._send_json(404, {"detail": "Order reference not found"})
+                return
+            with closing(connect_db()) as connection:
+                row = connection.execute("SELECT * FROM harvest_orders WHERE reference = ?", (reference,)).fetchone()
+                latest = connection.execute("SELECT note FROM harvest_order_events WHERE order_reference = ? ORDER BY id DESC LIMIT 1", (reference,)).fetchone()
+            if row is None:
+                self._send_json(404, {"detail": "Order reference not found"})
+                return
+            self._send_json(200, {"reference": row["reference"], "crop": row["crop"], "quantity": row["quantity"], "unit": row["unit"], "total": row["total"], "status": row["status"], "latest_note": latest["note"] if latest else "", "created_at": row["created_at"], "updated_at": row["updated_at"]})
+            return
+        if path == "/api/operator/orders":
+            if not self._operator_authorized():
+                return
+            with closing(connect_db()) as connection:
+                rows = connection.execute("SELECT * FROM harvest_orders ORDER BY created_at DESC").fetchall()
+                events = connection.execute("SELECT * FROM harvest_order_events ORDER BY id").fetchall()
+            event_map: dict[str, list[dict]] = {}
+            for event in events:
+                event_map.setdefault(event["order_reference"], []).append({"from_status": event["from_status"], "to_status": event["to_status"], "note": event["note"], "created_at": event["created_at"]})
+            self._send_json(200, {"orders": [{**dict(row), "events": event_map.get(row["reference"], [])} for row in rows]})
+            return
+        if path.startswith("/api/orders/"):
+            reference = path.removeprefix("/api/orders/").upper()
+            if not re.fullmatch(r"VAV-[0-9A-F]{16}", reference):
+                self._send_json(404, {"detail": "Order reference not found"})
+                return
+            with closing(connect_db()) as connection:
+                row = connection.execute("SELECT * FROM harvest_orders WHERE reference = ?", (reference,)).fetchone()
+            if row is None:
+                self._send_json(404, {"detail": "Order reference not found"})
+                return
+            self._send_json(200, {"reference": row["reference"], "crop": row["crop"], "quantity": row["quantity"], "unit": row["unit"], "total": row["total"], "status": row["status"], "created_at": row["created_at"], "updated_at": row["updated_at"]})
+            return
         if path == "/api/harvest-listings":
             params = dict(part.split("=", 1) for part in urlsplit(self.path).query.split("&") if "=" in part)
             if params.get("scope") == "review":
@@ -178,8 +257,16 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 query = "SELECT * FROM harvest_listings WHERE status = 'published' ORDER BY created_at DESC"
             with closing(connect_db()) as connection:
                 rows = connection.execute(query).fetchall()
-            public_keys = ("id", "crop", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "reviewed_at")
-            payloads = [({key: row[key] for key in public_keys} if params.get("scope") != "review" else self._listing_payload(row)) for row in rows]
+                public_keys = ("id", "crop", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "reviewed_at")
+                payloads = []
+                for row in rows:
+                    if params.get("scope") == "review":
+                        payloads.append(self._listing_payload(row))
+                    else:
+                        payload = {key: row[key] for key in public_keys}
+                        reserved = connection.execute("SELECT COALESCE(SUM(quantity), 0) AS quantity FROM harvest_orders WHERE listing_id = ? AND status != 'cancelled'", (row["id"],)).fetchone()["quantity"]
+                        payload["remaining_quantity"] = max(0, row["approved_quantity"] - reserved)
+                        payloads.append(payload)
             self._send_json(200, {"listings": payloads})
             return
         if path.startswith("/api/demo/orders/"):
@@ -203,6 +290,183 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         request_path = urlsplit(self.path).path
+        if request_path == "/api/orders":
+            if not OPERATOR_TOKEN:
+                self._send_json(503, {"detail": "Order requests are disabled until a local operator key is configured"})
+                return
+            try:
+                payload = self._read_json()
+                listing_id = payload.get("listing_id")
+                customer_name = payload.get("customer_name")
+                customer_phone = payload.get("customer_phone")
+                community = payload.get("community")
+                quantity = payload.get("quantity")
+                if not isinstance(listing_id, str) or not re.fullmatch(r"VAV-[0-9A-F]{10}", listing_id):
+                    raise ValueError("Choose a current OriginalRoot harvest offer")
+                if not isinstance(customer_name, str) or not 2 <= len(customer_name.strip()) <= 80:
+                    raise ValueError("Name must be 2 to 80 characters")
+                if not isinstance(customer_phone, str) or not re.fullmatch(r"[6-9][0-9]{9}", customer_phone):
+                    raise ValueError("Enter a valid 10-digit Indian mobile number")
+                if not isinstance(community, str) or community not in COMMUNITIES:
+                    raise ValueError("Choose a supported pickup community")
+                if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 100:
+                    raise ValueError("Quantity must be between 1 and 100 units")
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            reference = f"VAV-{uuid.uuid4().hex[:16].upper()}"
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            with closing(connect_db()) as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    listing = connection.execute("SELECT * FROM harvest_listings WHERE id = ? AND status = 'published'", (listing_id,)).fetchone()
+                    if listing is None or listing["community"] != community:
+                        connection.rollback()
+                        self._send_json(404, {"detail": "That harvest is no longer available in this community"})
+                        return
+                    reserved = connection.execute("SELECT COALESCE(SUM(quantity), 0) AS quantity FROM harvest_orders WHERE listing_id = ? AND status != 'cancelled'", (listing_id,)).fetchone()["quantity"]
+                    if quantity > listing["approved_quantity"] - reserved:
+                        connection.rollback()
+                        self._send_json(409, {"detail": "There is not enough unreserved quantity in this harvest"})
+                        return
+                    total = listing["buyer_price"] * quantity
+                    connection.execute(
+                        """INSERT INTO harvest_orders (reference, listing_id, crop, farm_name, customer_name, customer_phone, community, quantity, unit, grower_payout, packing_cost, platform_fee, route_cost, total, status, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?)""",
+                        (reference, listing_id, listing["crop"], listing["farm_name"], customer_name.strip(), customer_phone, community, quantity, listing["unit"], listing["grower_payout"] * quantity, listing["packing_cost"] * quantity, listing["platform_fee"] * quantity, listing["route_cost"] * quantity, total, now, now),
+                    )
+                    connection.execute("INSERT INTO harvest_order_events (order_reference, from_status, to_status, note, created_at) VALUES (?, NULL, 'requested', 'Customer requested a pickup order; payment not collected', ?)", (reference, now))
+                    connection.commit()
+                except sqlite3.Error:
+                    connection.rollback()
+                    self._send_json(503, {"detail": "Could not record the order. Please try again."})
+                    return
+            self._send_json(201, {"reference": reference, "status": "requested", "crop": listing["crop"], "quantity": quantity, "unit": listing["unit"], "total": total, "message": "Order request recorded. Wait for operator confirmation before pickup; no payment was collected."})
+            return
+        if request_path.startswith("/api/operator/orders/") and request_path.endswith("/status"):
+            if not self._operator_authorized():
+                return
+            reference = request_path.removeprefix("/api/operator/orders/").removesuffix("/status").strip("/").upper()
+            try:
+                payload = self._read_json()
+                new_status = payload.get("status")
+                note = payload.get("note", "")
+                allowed = {"requested": {"accepted", "cancelled"}, "accepted": {"ready_for_pickup", "cancelled"}, "ready_for_pickup": {"completed", "cancelled"}}
+                if not isinstance(new_status, str):
+                    raise ValueError("Choose a valid next status")
+                if not isinstance(note, str) or not 3 <= len(note.strip()) <= 240:
+                    raise ValueError("Add a 3 to 240 character status note")
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                with closing(connect_db()) as connection:
+                    try:
+                        connection.execute("BEGIN IMMEDIATE")
+                        order = connection.execute("SELECT * FROM harvest_orders WHERE reference = ?", (reference,)).fetchone()
+                        if order is None:
+                            connection.rollback()
+                            self._send_json(404, {"detail": "Order not found"})
+                            return
+                        if new_status not in allowed.get(order["status"], set()):
+                            connection.rollback()
+                            self._send_json(409, {"detail": f"Cannot move an order from {order['status']} to {new_status}"})
+                            return
+                        connection.execute("UPDATE harvest_orders SET status = ?, updated_at = ? WHERE reference = ?", (new_status, now, reference))
+                        connection.execute("INSERT INTO harvest_order_events (order_reference, from_status, to_status, note, created_at) VALUES (?, ?, ?, ?, ?)", (reference, order["status"], new_status, note.strip(), now))
+                        connection.commit()
+                    except sqlite3.Error:
+                        connection.rollback()
+                        self._send_json(503, {"detail": "Could not update the order. Please retry."})
+                        return
+                self._send_json(200, {"reference": reference, "status": new_status, "updated_at": now})
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+            return
+        if request_path == "/api/orders":
+            try:
+                payload = self._read_json()
+                listing_id = payload.get("listing_id")
+                customer_name = payload.get("customer_name")
+                customer_phone = payload.get("customer_phone")
+                community = payload.get("community")
+                quantity = payload.get("quantity")
+                if not isinstance(listing_id, str) or not re.fullmatch(r"VAV-[0-9A-F]{10}", listing_id):
+                    raise ValueError("Choose a current OriginalRoot harvest offer")
+                if not isinstance(customer_name, str) or not 2 <= len(customer_name.strip()) <= 80:
+                    raise ValueError("Name must be 2 to 80 characters")
+                if not isinstance(customer_phone, str) or not re.fullmatch(r"[6-9][0-9]{9}", customer_phone):
+                    raise ValueError("Enter a valid 10-digit Indian mobile number")
+                if not isinstance(community, str) or community not in COMMUNITIES:
+                    raise ValueError("Choose a supported pickup community")
+                if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 100:
+                    raise ValueError("Quantity must be between 1 and 100 units")
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            reference = f"VAV-{uuid.uuid4().hex[:16].upper()}"
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            with closing(connect_db()) as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    listing = connection.execute("SELECT * FROM harvest_listings WHERE id = ? AND status = 'published'", (listing_id,)).fetchone()
+                    if listing is None or listing["community"] != community:
+                        connection.rollback()
+                        self._send_json(404, {"detail": "That harvest is no longer available in this community"})
+                        return
+                    reserved = connection.execute("SELECT COALESCE(SUM(quantity), 0) AS quantity FROM harvest_orders WHERE listing_id = ? AND status != 'cancelled'", (listing_id,)).fetchone()["quantity"]
+                    if quantity > listing["approved_quantity"] - reserved:
+                        connection.rollback()
+                        self._send_json(409, {"detail": "There is not enough unreserved quantity in this harvest"})
+                        return
+                    total = listing["buyer_price"] * quantity
+                    connection.execute(
+                        """INSERT INTO harvest_orders (reference, listing_id, crop, farm_name, customer_name, customer_phone, community, quantity, unit, grower_payout, packing_cost, platform_fee, route_cost, total, status, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?)""",
+                        (reference, listing_id, listing["crop"], listing["farm_name"], customer_name.strip(), customer_phone, community, quantity, listing["unit"], listing["grower_payout"] * quantity, listing["packing_cost"] * quantity, listing["platform_fee"] * quantity, listing["route_cost"] * quantity, total, now, now),
+                    )
+                    connection.execute("INSERT INTO harvest_order_events (order_reference, from_status, to_status, note, created_at) VALUES (?, NULL, 'requested', 'Customer requested a pickup order; payment not collected', ?)", (reference, now))
+                    connection.commit()
+                except sqlite3.Error:
+                    connection.rollback()
+                    self._send_json(503, {"detail": "Could not record the order. Please try again."})
+                    return
+            self._send_json(201, {"reference": reference, "status": "requested", "crop": listing["crop"], "quantity": quantity, "unit": listing["unit"], "total": total, "message": "Order request recorded. Wait for operator confirmation before pickup; no payment was collected."})
+            return
+        if request_path.startswith("/api/operator/orders/") and request_path.endswith("/status"):
+            if not self._operator_authorized():
+                return
+            reference = request_path.removeprefix("/api/operator/orders/").removesuffix("/status").strip("/").upper()
+            try:
+                payload = self._read_json()
+                new_status = payload.get("status")
+                note = payload.get("note", "")
+                allowed = {"requested": {"accepted", "cancelled"}, "accepted": {"ready_for_pickup", "cancelled"}, "ready_for_pickup": {"completed", "cancelled"}}
+                if not isinstance(new_status, str):
+                    raise ValueError("Choose a valid next status")
+                if not isinstance(note, str) or not 3 <= len(note.strip()) <= 240:
+                    raise ValueError("Add a 3 to 240 character status note")
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                with closing(connect_db()) as connection:
+                    try:
+                        connection.execute("BEGIN IMMEDIATE")
+                        order = connection.execute("SELECT * FROM harvest_orders WHERE reference = ?", (reference,)).fetchone()
+                        if order is None:
+                            connection.rollback()
+                            self._send_json(404, {"detail": "Order not found"})
+                            return
+                        if new_status not in allowed.get(order["status"], set()):
+                            connection.rollback()
+                            self._send_json(409, {"detail": f"Cannot move an order from {order['status']} to {new_status}"})
+                            return
+                        connection.execute("UPDATE harvest_orders SET status = ?, updated_at = ? WHERE reference = ?", (new_status, now, reference))
+                        connection.execute("INSERT INTO harvest_order_events (order_reference, from_status, to_status, note, created_at) VALUES (?, ?, ?, ?, ?)", (reference, order["status"], new_status, note.strip(), now))
+                        connection.commit()
+                    except sqlite3.Error:
+                        connection.rollback()
+                        self._send_json(503, {"detail": "Could not update the order. Please retry."})
+                        return
+                self._send_json(200, {"reference": reference, "status": new_status, "updated_at": now})
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+            return
         if request_path == "/api/harvest-listings":
             try:
                 payload = self._read_json()
@@ -437,6 +701,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("OriginalRoot_PORT", "8080"))
     with closing(connect_db()):
         pass
-    print(f"OriginalRoot demo server listening on http://{host}:{port} (demo orders only; no payments)")
+    print(f"OriginalRoot local API listening on http://{host}:{port} (online payments disabled)")
     ThreadingHTTPServer((host, port), OriginalRootHandler).serve_forever()
 

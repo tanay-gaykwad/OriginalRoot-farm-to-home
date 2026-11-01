@@ -27,6 +27,8 @@ OriginalRoot starts as a demand-led harvest network for one local corridor. Its 
 
 Phase 2 adds a grower offer → operator review → approved customer listing workflow. See the [Phase 2 operating workflow](docs/PHASE_2.md) for setup, review rules, and deployment boundaries.
 
+Phase 3 adds pickup order requests, atomic quantity reservations, operator status updates, and reference-based customer tracking. See the [Phase 3 order workflow](docs/PHASE_3.md).
+
 ## Run locally
 
 Run these commands from the project root:
@@ -77,10 +79,13 @@ Copy `.env.example` to `.env`, replace the placeholder with a long random key, t
 - `GET /api/harvest-listings` returns approved offers only.
 - `GET /api/harvest-listings?scope=review` returns the pending queue with `Authorization: Bearer <operator-key>`.
 - `POST /api/operator/harvest-listings/{id}/decision` approves or declines a pending offer. Approval checks that grower payout is at least the stated floor and calculates the customer price from the four visible price components.
+- `POST /api/orders` requests pickup of a published offer. Quantity reservation is atomic; a local operator key must be configured. This stores the customer's name and mobile number in the local SQLite database.
+- `GET /api/orders/{reference}` returns status and pickup notes without customer contact details.
+- `GET /api/operator/orders` and `POST /api/operator/orders/{reference}/status` expose and update the pickup queue with the operator key.
 - `POST /api/demo/orders` records a non-personal sample order. The request body contains only product IDs and quantities.
 - `GET /api/demo/orders/{reference}` retrieves that sample order and its price breakdown.
 
-The API binds to `127.0.0.1` by default. The operator key protects review endpoints; it is a small pilot control, not a substitute for production user accounts, identity checks, rate limits, or a security review. Do not expose this server to the internet or use it for real orders. The GitHub Pages site hosts the frontend only and does not connect to this local API, so offers submitted there are saved in that browser and cannot be reviewed or published.
+The API binds to `127.0.0.1` by default. The operator key protects review and order-management endpoints; it is a small local-pilot control, not a substitute for production user accounts, identity checks, rate limits, or a security review. Do not expose this server to the internet. The GitHub Pages site hosts the frontend only, has no shared API, and disables order requests.
 
 ## Product direction
 
