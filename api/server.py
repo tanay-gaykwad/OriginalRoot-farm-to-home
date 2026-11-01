@@ -226,7 +226,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 return
             with closing(connect_db()) as connection:
                 listing = connection.execute("SELECT * FROM harvest_listings WHERE id = ? AND status = 'published'", (listing_id,)).fetchone()
-                events = connection.execute("SELECT event_type, location, detail, recorded_by, created_at FROM harvest_passport_events WHERE listing_id = ? ORDER BY created_at, id", (listing_id,)).fetchall()
+                events = connection.execute("SELECT event_type, location, detail, recorded_by, created_at FROM harvest_passport_events WHERE listing_id = ? ORDER BY rowid", (listing_id,)).fetchall()
             if listing is None:
                 self._send_json(404, {"detail": "Batch passport not found"})
                 return
@@ -424,7 +424,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 detail = payload.get("detail")
                 if not re.fullmatch(r"VAV-[0-9A-F]{10}", listing_id):
                     raise ValueError("Choose a valid published batch")
-                if event_type not in {"harvested", "weighed", "graded", "packed", "handed_off"}:
+                if not isinstance(event_type, str) or event_type not in {"harvested", "weighed", "graded", "packed", "handed_off"}:
                     raise ValueError("Choose a supported batch checkpoint")
                 if not isinstance(location, str) or len(location.strip()) > 100:
                     raise ValueError("Location must be 100 characters or fewer")
