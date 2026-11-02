@@ -28,4 +28,4 @@ jobs:
       - name: Check desktop launcher syntax
         run: node --check desktop/main.cjs
       - name: Build local Docker image
-        run: docker build --tag originalroot-farm-to-home:ci .
+        run: docker build --tag originalroot:ci .
