@@ -81,6 +81,8 @@ Phase 17 lets customers update profile details and download their account-linked
 
 Phase 18 gives growers a workspace dashboard for their own offers and adds a filtered daily wholesale mandi reference from the Government of India's data.gov.in API. The key stays in the server environment; no example prices or predicted trends are shown as live data. See the [Phase 18 grower dashboard and mandi prices](docs/PHASE_18.md).
 
+Phase 19 brings the harvest closer to the grower: each offer can include a short grower-written note and the marketplace can surface an operator-approved batch photo, with the same context carried into the review queue and batch record. The marketplace is styled as a fuller shop experience. The local API also adds same-origin checks to browser writes, lockouts after repeated operator/grower sign-in failures, and owner-only permissions for SQLite data and evidence storage. See the [Phase 19 marketplace and local data safeguards](docs/PHASE_19.md).
+
 ## Run locally
 
 Run these commands from the project root:
@@ -167,7 +169,7 @@ For a first-use walkthrough of offers, delivery, and support, see the [Phase 8 o
 - `POST /api/demo/orders` records a non-personal sample order. The request body contains only product IDs and quantities.
 - `GET /api/demo/orders/{reference}` retrieves that sample order and its price breakdown.
 
-The API binds to `127.0.0.1` by default. Named operator sessions protect review and order-management endpoints; the bootstrap key is limited to first-owner setup. `python api/backup.py create`, `verify`, and `restore` manage local data bundles; backups are manual, unencrypted, and must be copied to protected storage outside the Docker volume. Local sessions and the audit history are not a production identity, recovery, remote backup, or tamper-proof audit service. Do not expose this server to the internet. The GitHub Pages site hosts the frontend only, has no shared API, and disables account-based operations.
+The API binds to `127.0.0.1` by default. Named operator sessions protect review and order-management endpoints; the bootstrap key is limited to first-owner setup. `python api/backup.py create`, `verify`, and `restore` manage local data bundles; backups are manual, unencrypted, and must be copied to protected storage outside the Docker volume. SQLite is protected by local filesystem permissions but is not encrypted at rest. Local sessions and the audit history are not a production identity, recovery, remote backup, or tamper-proof audit service. Do not expose this server to the internet. The GitHub Pages site hosts the frontend only, has no shared API, and disables account-based operations.
 
 ## Product direction
 
@@ -191,6 +193,7 @@ Use the [local pilot runbook](docs/PILOT_RUNBOOK.md) before inviting participant
 - SQLite-backed batch passports with operator-recorded handling checkpoints
 - Local grower sessions and account-owned offer history
 - Docker Compose for a one-command local package
+- Filesystem-restricted SQLite for local operation; managed production database hosting is not configured
 
 ## License
 

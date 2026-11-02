@@ -9,6 +9,7 @@ services:
       OriginalRoot_DB_PATH: /data/OriginalRoot.sqlite3
       OriginalRoot_OPERATOR_TOKEN: ${OriginalRoot_OPERATOR_TOKEN:-}
       OriginalRoot_DATA_GOV_IN_API_KEY: ${OriginalRoot_DATA_GOV_IN_API_KEY:-}
+      OriginalRoot_COOKIE_SECURE: ${OriginalRoot_COOKIE_SECURE:-0}
     volumes:
       - OriginalRoot-data:/data
     healthcheck:

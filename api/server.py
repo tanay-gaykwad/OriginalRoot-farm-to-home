@@ -64,9 +64,23 @@ PRODUCTS = {item["id"]: item for item in CATALOG}
 
 def connect_db() -> sqlite3.Connection:
     DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # The volume directory also holds private evidence images and database journals.
+    # Keep it owner-only so newly created SQLite sidecar files inherit a private boundary.
+    try:
+        DATA_PATH.parent.chmod(0o700)
+    except OSError:
+        pass
     connection = sqlite3.connect(DATA_PATH, timeout=5)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA busy_timeout=5000")
+    connection.execute("PRAGMA foreign_keys=ON")
+    connection.execute("PRAGMA secure_delete=ON")
+    connection.execute("PRAGMA synchronous=FULL")
+    try:
+        DATA_PATH.chmod(0o600)
+    except OSError:
+        pass
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS demo_orders (
@@ -113,12 +127,15 @@ def connect_db() -> sqlite3.Connection:
             platform_fee INTEGER,
             route_cost INTEGER,
             buyer_price INTEGER,
+            grower_note TEXT NOT NULL DEFAULT '',
             decision_note TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             reviewed_at TEXT
         )"""
     )
     listing_columns = {row["name"] for row in connection.execute("PRAGMA table_info(harvest_listings)")}
+    if "grower_note" not in listing_columns:
+        connection.execute("ALTER TABLE harvest_listings ADD COLUMN grower_note TEXT NOT NULL DEFAULT ''")
     if "category" not in listing_columns:
         connection.execute("ALTER TABLE harvest_listings ADD COLUMN category TEXT NOT NULL DEFAULT 'unclassified'")
         connection.execute(
@@ -484,6 +501,50 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         token = secrets.token_urlsafe(32)
         return token, hashlib.sha256(token.encode("utf-8")).hexdigest()
 
+    def _same_origin_request(self) -> bool:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True  # Non-browser local clients do not send Origin.
+        parsed = urlsplit(origin)
+        host = self.headers.get("Host", "").lower()
+        return parsed.scheme in {"http", "https"} and parsed.netloc.lower() == host and not parsed.username and not parsed.password
+
+    def _auth_bucket(self, scope: str) -> str:
+        return hashlib.sha256(f"{scope}-login:{self.client_address[0]}".encode("utf-8")).hexdigest()
+
+    def _auth_is_locked(self, scope: str) -> bool:
+        bucket = self._auth_bucket(scope)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with closing(connect_db()) as connection:
+            row = connection.execute("SELECT locked_until FROM customer_login_limits WHERE bucket_hash = ?", (bucket,)).fetchone()
+        if row and row["locked_until"] and row["locked_until"] > now:
+            self._send_json(429, {"detail": "Too many sign-in attempts. Try again in 15 minutes."})
+            return True
+        return False
+
+    def _record_auth_failure(self, scope: str) -> None:
+        bucket = self._auth_bucket(scope)
+        now = datetime.now(timezone.utc)
+        now_text = now.isoformat(timespec="seconds")
+        with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT failed_attempts, window_started_at FROM customer_login_limits WHERE bucket_hash = ?", (bucket,)).fetchone()
+            within_window = row and row["window_started_at"] > (now - timedelta(minutes=15)).isoformat(timespec="seconds")
+            failures = (row["failed_attempts"] if within_window else 0) + 1
+            window_start = row["window_started_at"] if within_window else now_text
+            locked_until = (now + timedelta(minutes=15)).isoformat(timespec="seconds") if failures >= 5 else None
+            connection.execute(
+                """INSERT INTO customer_login_limits (bucket_hash, failed_attempts, window_started_at, locked_until)
+                   VALUES (?, ?, ?, ?) ON CONFLICT(bucket_hash) DO UPDATE SET failed_attempts = excluded.failed_attempts,
+                   window_started_at = excluded.window_started_at, locked_until = excluded.locked_until""",
+                (bucket, failures, window_start, locked_until),
+            )
+            connection.commit()
+
+    def _clear_auth_failures(self, scope: str) -> None:
+        with closing(connect_db()) as connection, connection:
+            connection.execute("DELETE FROM customer_login_limits WHERE bucket_hash = ?", (self._auth_bucket(scope),))
+
     @staticmethod
     def _listing_payload(row: sqlite3.Row) -> dict:
         return {key: row[key] for key in row.keys()}
@@ -638,7 +699,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 self._send_json(401, {"detail": "Sign in to view your harvest offers"})
                 return
             with closing(connect_db()) as connection:
-                rows = connection.execute("SELECT id, crop, category, community, available_quantity, unit, harvest_window, minimum_payout, status, approved_quantity, grade, grower_payout, buyer_price, decision_note, created_at, reviewed_at FROM harvest_listings WHERE grower_id = ? ORDER BY created_at DESC", (grower["id"],)).fetchall()
+                rows = connection.execute("SELECT id, crop, category, community, available_quantity, unit, harvest_window, minimum_payout, grower_note, status, approved_quantity, grade, grower_payout, buyer_price, decision_note, created_at, reviewed_at FROM harvest_listings WHERE grower_id = ? ORDER BY created_at DESC", (grower["id"],)).fetchall()
             self._send_json(200, {"listings": [dict(row) for row in rows]})
             return
         if path == "/api/grower/evidence":
@@ -817,7 +878,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             if listing is None:
                 self._send_json(404, {"detail": "Batch passport not found"})
                 return
-            passport = {key: listing[key] for key in ("id", "crop", "category", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "reviewed_at")}
+            passport = {key: listing[key] for key in ("id", "crop", "category", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "grower_note", "reviewed_at")}
             published_evidence = [{**dict(item), "file_url": f"/api/evidence/{item['id']}/file", "reviewer_role": "OriginalRoot operator"} for item in evidence_rows]
             self._send_json(200, {"passport": passport, "events": [dict(event) for event in events], "evidence": published_evidence, "record_note": "An operator reviewed the listed evidence. This review is not independent certification and cannot guarantee that every claim is accurate. Other handling notes are operator-recorded."})
             return
@@ -860,13 +921,18 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 query = "SELECT * FROM harvest_listings WHERE status = 'published' AND category IN ('fresh', 'staples') ORDER BY created_at DESC"
             with closing(connect_db()) as connection:
                 rows = connection.execute(query).fetchall()
-                public_keys = ("id", "crop", "category", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "reviewed_at")
+                public_keys = ("id", "crop", "category", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "grower_note", "reviewed_at")
                 payloads = []
                 for row in rows:
                     if params.get("scope") == "review":
                         payloads.append(self._listing_payload(row))
                     else:
                         payload = {key: row[key] for key in public_keys}
+                        evidence = connection.execute(
+                            "SELECT id FROM harvest_evidence WHERE listing_id = ? AND review_status = 'approved' ORDER BY reviewed_at DESC, id DESC LIMIT 1",
+                            (row["id"],),
+                        ).fetchone()
+                        payload["image_url"] = f"/api/evidence/{evidence['id']}/file" if evidence else ""
                         reserved = connection.execute("SELECT COALESCE(SUM(quantity), 0) AS quantity FROM harvest_orders WHERE listing_id = ? AND status != 'cancelled'", (row["id"],)).fetchone()["quantity"]
                         payload["remaining_quantity"] = max(0, row["approved_quantity"] - reserved)
                         payloads.append(payload)
@@ -893,7 +959,12 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         request_path = urlsplit(self.path).path
+        if not self._same_origin_request():
+            self._send_json(403, {"detail": "Cross-origin requests are not accepted"})
+            return
         if request_path == "/api/operator/bootstrap":
+            if self._auth_is_locked("operator-bootstrap"):
+                return
             if not OPERATOR_TOKEN:
                 self._send_json(503, {"detail": "Set the local bootstrap key before setting up the first operator"})
                 return
@@ -904,8 +975,10 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 username = payload.get("username")
                 password = payload.get("password")
                 if not isinstance(bootstrap_key, str) or not hmac.compare_digest(bootstrap_key.encode(), OPERATOR_TOKEN.encode()):
+                    self._record_auth_failure("operator-bootstrap")
                     self._send_json(401, {"detail": "Bootstrap key is invalid"})
                     return
+                self._clear_auth_failures("operator-bootstrap")
                 if not isinstance(full_name, str) or not 2 <= len(full_name.strip()) <= 80:
                     raise ValueError("Name must be 2 to 80 characters")
                 if not isinstance(username, str) or not re.fullmatch(r"[a-zA-Z0-9_.-]{3,32}", username):
@@ -937,6 +1010,8 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             self._send_json(201, {"operator": {"id": operator_id, "username": username, "full_name": full_name.strip(), "role": "owner"}}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_operator_session")})
             return
         if request_path == "/api/operator/login":
+            if self._auth_is_locked("operator"):
+                return
             try:
                 payload = self._read_json()
                 username = payload.get("username")
@@ -947,8 +1022,10 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                     operator = connection.execute("SELECT id, username, full_name, role, password_hash, password_salt FROM operator_users WHERE username = ? AND is_active = 1", (username.lower(),)).fetchone()
                 supplied_hash = self._password_hash(password, operator["password_salt"] if operator else "00" * 16)
                 if operator is None or not hmac.compare_digest(supplied_hash, operator["password_hash"]):
+                    self._record_auth_failure("operator")
                     self._send_json(401, {"detail": "Username or password is incorrect"})
                     return
+                self._clear_auth_failures("operator")
                 now = datetime.now(timezone.utc)
                 token, token_hash = self._session_token()
                 with closing(connect_db()) as connection, connection:
@@ -1305,6 +1382,8 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             self._send_json(201, {"grower": {"id": grower_id, "username": username, "farm_name": farm_name.strip()}}, {"Set-Cookie": self._session_cookie(token)})
             return
         if request_path == "/api/grower/login":
+            if self._auth_is_locked("grower"):
+                return
             try:
                 payload = self._read_json()
                 username = payload.get("username")
@@ -1315,8 +1394,10 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                     account = connection.execute("SELECT id, username, farm_name, password_hash, password_salt FROM growers WHERE username = ?", (username.lower(),)).fetchone()
                 supplied_hash = self._password_hash(password, account["password_salt"] if account else "00" * 16)
                 if account is None or not hmac.compare_digest(supplied_hash, account["password_hash"]):
+                    self._record_auth_failure("grower")
                     self._send_json(401, {"detail": "Username or password is incorrect"})
                     return
+                self._clear_auth_failures("grower")
                 now = datetime.now(timezone.utc)
                 token, token_hash = self._session_token()
                 with closing(connect_db()) as connection, connection:
@@ -1783,6 +1864,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 unit = payload.get("unit")
                 harvest_window = payload.get("harvest_window")
                 minimum_payout = payload.get("minimum_payout")
+                grower_note = payload.get("grower_note", "")
                 if not isinstance(crop, str) or not 2 <= len(crop.strip()) <= 60:
                     raise ValueError("Crop name must be 2 to 60 characters")
                 if not isinstance(category, str) or category not in PRODUCT_CATEGORIES:
@@ -1797,6 +1879,8 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                     raise ValueError("Choose a harvest window")
                 if isinstance(minimum_payout, bool) or not isinstance(minimum_payout, int) or not 1 <= minimum_payout <= 1_000_000:
                     raise ValueError("Minimum payout must be a positive rupee amount per unit")
+                if not isinstance(grower_note, str) or len(grower_note.strip()) > 300:
+                    raise ValueError("Harvest note must be 300 characters or fewer")
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
                 return
@@ -1804,9 +1888,9 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             with closing(connect_db()) as connection, connection:
                 connection.execute(
                     """INSERT INTO harvest_listings
-                       (id, grower_id, crop, farm_name, community, available_quantity, unit, harvest_window, minimum_payout, category, status, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
-                    (listing_id, grower["id"], crop.strip(), grower["farm_name"], community, quantity, unit, harvest_window, minimum_payout, category, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+                       (id, grower_id, crop, farm_name, community, available_quantity, unit, harvest_window, minimum_payout, category, grower_note, status, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                    (listing_id, grower["id"], crop.strip(), grower["farm_name"], community, quantity, unit, harvest_window, minimum_payout, category, grower_note.strip(), datetime.now(timezone.utc).isoformat(timespec="seconds")),
                 )
                 row = connection.execute("SELECT * FROM harvest_listings WHERE id = ?", (listing_id,)).fetchone()
             self._send_json(201, {"listing": self._listing_payload(row), "message": "Offer submitted for review. It is not public until the grower-approved terms are confirmed."})
@@ -2008,6 +2092,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    os.umask(0o077)
     host = os.environ.get("OriginalRoot_HOST", "127.0.0.1")
     port = int(os.environ.get("OriginalRoot_PORT", "8080"))
     with closing(connect_db()):

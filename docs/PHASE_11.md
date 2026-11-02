@@ -21,18 +21,19 @@ OriginalRoot does not need every planned feature before it can launch anything. 
 
 Do not invite the general public to place real orders until the platform has a hosted production API, managed database, customer account or secure guest-order flows, payment and refund handling, protected backups, account recovery, privacy and retention controls, and a staffed fulfilment process. The current local app has no payment integration and must not be exposed to the internet.
 
-## Remaining roadmap
+## Roadmap status
 
-1. **Phase 12 — Operational app shell (complete):** the customer marketplace now reads approved offers from the connected API, distinguishes empty from offline states, and no longer offers a browser-only sample checkout. See [Phase 12](PHASE_12.md).
-2. **Phase 13 — Crop groups and selling units (complete):** the offer lifecycle supports fresh produce and grains/pulses with API-validated units, customer filters, and safe re-review of unclassified legacy offers. See [Phase 13](PHASE_13.md).
-3. **Phase 14 — Customer identity and order lifecycle:** add customer profiles and private order history, cancellations, account recovery, and clear dispute outcomes.
-4. **Phase 15 — Production data foundation:** add database migrations, a managed hosted database, private object storage for evidence, automated encrypted off-site backups, monitoring, and environment-based secret management.
-5. **Phase 16 — Payments and settlement:** choose an appropriate provider, add server-side payment and refund APIs, settlement reconciliation, and clear grower payout records. Never place provider API secrets in browser code or Git.
-6. **Phase 17 — Pilot and public launch gates:** validate one real corridor with participating growers and customers, record delivery and complaint outcomes, review local legal/privacy/food-handling requirements, and only then widen access.
+Phases 12–19 are complete as documented in [Phase 12](PHASE_12.md), [Phase 13](PHASE_13.md), [Phase 14](PHASE_14.md), [Phase 15](PHASE_15.md), [Phase 16](PHASE_16.md), [Phase 17](PHASE_17.md), [Phase 18](PHASE_18.md), and [Phase 19](PHASE_19.md). Together they make a connected local app for reviewed offers, customer requests, grower and customer accounts, order tracking, batch records, support, mandi references, and the producer-first marketplace.
+
+## Remaining before hosted/public launch
+
+1. **Production data foundation:** hosted API, managed database, object storage, automated encrypted off-site backups, restore drills, monitoring, and secret management.
+2. **Customer relationship and settlement:** direct buyer/grower messaging, verified account recovery, payment authorization, refunds, reconciliation, and grower payouts.
+3. **Field operations and launch gates:** validate supply, grading, food handling, delivery, and complaints in one corridor; complete privacy, security, and applicable legal review before widening access.
 
 ## Credentials and data boundary
 
-OriginalRoot must never store plaintext passwords. The local API currently stores salted password hashes and keeps session tokens in HTTP-only cookies. Production deployment still needs HTTPS, secure cookies, account recovery, rate limiting, key rotation, a protected secret store, and an access-controlled customer data policy. Provider API keys belong only in backend secrets, not React code, browser storage, screenshots, or the repository.
+OriginalRoot must never store plaintext passwords. The local API stores salted password hashes and keeps session tokens in HTTP-only cookies. It checks browser write origins, limits repeated operator/grower sign-in attempts, and applies owner-only file permissions to its local SQLite data where supported. Production deployment still needs HTTPS, secure cookies enabled, account recovery, distributed rate limiting, key rotation, a protected secret store, and an access-controlled customer data policy. Provider API keys belong only in backend secrets, not React code, browser storage, screenshots, or the repository.
 
 ## Current boundary
 
