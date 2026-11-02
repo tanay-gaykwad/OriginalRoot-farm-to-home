@@ -22,6 +22,7 @@ import { BrandSite } from "./BrandSite";
 import { OperatorSpace, OrderRequestModal, OrderTrackingModal, PublishedHarvests, type PublishedOffer } from "./PhaseTwo";
 import { BatchPassportModal } from "./PhaseFour";
 import { GrowerWorkspace } from "./PhaseFive";
+import { CustomerWorkspace } from "./PhaseFourteen";
 
 type Product = {
   id: string;
@@ -52,11 +53,11 @@ function Logo({ compact = false }: { compact?: boolean }) {
   return <a className={`brand ${compact ? "brand-compact" : ""}`} href="#top" aria-label="OriginalRoot home"><span className="brand-symbol"><Leaf size={19} strokeWidth={2.4} /></span><span className="brand-name">OriginalRoot<span>.</span></span></a>;
 }
 
-type Workspace = "shop" | "grower" | "operator";
+type Workspace = "shop" | "grower" | "operator" | "customer";
 
 function currentWorkspace(): Workspace {
   const workspace = new URLSearchParams(window.location.search).get("workspace");
-  return workspace === "grower" || workspace === "operator" ? workspace : "shop";
+  return workspace === "grower" || workspace === "operator" || workspace === "customer" ? workspace : "shop";
 }
 
 function isPlatformRoute(): boolean {
@@ -150,6 +151,7 @@ function MarketplaceApp() {
             <button className={mode === "shop" ? "nav-active" : ""} onClick={() => { setMode("shop"); setMobileNav(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Marketplace</button>
             <button className={mode === "grower" ? "nav-active" : ""} onClick={() => { setMode("grower"); setMobileNav(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Grower workspace</button>
             <button className={mode === "operator" ? "nav-active" : ""} onClick={() => { setMode("operator"); setMobileNav(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Operations</button>
+            <button className={mode === "customer" ? "nav-active" : ""} onClick={() => { setMode("customer"); setMobileNav(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}>My orders</button>
             <button onClick={() => { setModal({ type: "track" }); setMobileNav(false); }}>Track order</button>
           </div>
           <div className="header-actions"><button className="mobile-menu" onClick={() => setMobileNav(!mobileNav)} aria-label="Toggle navigation">{mobileNav ? <X /> : <Menu />}</button></div>
@@ -176,7 +178,7 @@ function MarketplaceApp() {
           <section className="farmer-cta wrap"><div className="cta-art"><span className="cta-sun" /><span className="cta-field" /><span className="cta-person">🧑🏽‍🌾</span><span className="cta-plant">🌾</span><span className="cta-note">Built with<br />growers in mind</span></div><div className="cta-copy"><div className="eyebrow"><span className="eyebrow-line" /> For the people who grow</div><h2>Your harvest deserves<br />a <em>better conversation.</em></h2><p>Bring your produce, your standards, and your voice. OriginalRoot is built to make offers, grading, and payments easier to see and question.</p><div className="cta-points"><span><Check size={14} /> Clear weights and grading notes</span><span><Check size={14} /> A payout record you can follow</span><span><Check size={14} /> Sell now or plan a confirmed order</span></div><button className="button button-dark" onClick={() => setMode("grower")}>Explore the grower space <ArrowRight size={16} /></button></div></section>
         </main>
         <footer className="site-footer"><div className="wrap footer-top"><div><Logo /><p>Good food has a real starting point.<br />We’re making it easier to see.</p></div><div className="footer-links"><a href="#the-harvest">Browse harvest</a><a href={(() => { const url = new URL(window.location.href); url.search = ""; url.hash = ""; return url.pathname; })()}>About OriginalRoot</a><button onClick={() => setMode("grower")}>Grow with OriginalRoot</button><button onClick={() => setModal({ type: "track" })}>Track an order</button></div><div className="footer-location"><span className="fresh-dot" /> Local focus <b>Mysuru & nearby</b><small>Example catalog; live listings require local review</small></div></div><div className="wrap footer-bottom"><span>© 2026 OriginalRoot · A local-first food network</span><span>Clear records. Fair terms. No scarcity games.</span><button onClick={() => setNotice("The local API supports grower offers, review, orders, support, and delivery handoffs. Payments are not enabled; GitHub Pages has no shared database.")}>Data & service note</button></div></footer>
-      </> : mode === "grower" ? <GrowerWorkspace onShop={showShop} /> : <OperatorSpace onShop={showShop} />}
+      </> : mode === "grower" ? <GrowerWorkspace onShop={showShop} /> : mode === "customer" ? <CustomerWorkspace onShop={showShop} /> : <OperatorSpace onShop={showShop} />}
 
 
       {modal?.type === "trace" && <div className="modal-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setModal(null); }}><section className="passport-modal"><button className="modal-close icon-button" onClick={() => setModal(null)} aria-label="Close"><X size={19} /></button><div className={`passport-cover art-${modal.product.color}`}><span className="passport-kicker"><QrCode size={15} /> OriginalRoot FARM PASSPORT</span><span className="passport-emoji">{modal.product.emoji}</span><span className="passport-batch">BATCH {modal.product.batch}</span></div><div className="passport-content"><div className="passport-title-row"><div><span className="eyebrow">A little more about your food</span><h2>{modal.product.name}</h2><p>{modal.product.variety}</p></div><span className="grade-pill"><BadgeCheck size={14} /> {modal.product.grade}</span></div><div className="grower-card"><span className="grower-avatar">{modal.product.farm.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase()}</span><span><b>{modal.product.farm}</b><small><MapPin size={12} /> {modal.product.location}</small></span><span className="verified-chip"><ShieldCheck size={13} /> Sample profile</span></div><div className="trace-timeline"><div className="timeline-item complete"><span><Check size={12} /></span><div><b>Picked at the farm</b><small>{modal.product.harvest}</small></div></div><div className="timeline-item complete"><span><Check size={12} /></span><div><b>Weighed and graded</b><small>Collection point · {modal.product.grade}</small></div></div><div className="timeline-item complete"><span><Check size={12} /></span><div><b>Packed for the local route</b><small>Batch {modal.product.batch}</small></div></div><div className="timeline-item upcoming"><span><Truck size={12} /></span><div><b>Delivered to your neighbourhood</b><small>Route grouped to reduce extra trips</small></div></div></div><div className="passport-note"><ShieldCheck size={16} /><span><b>What this proves</b><small>These example records illustrate batch details. A real Farm Passport needs field checks and operator records.</small></span></div></div></section></div>}

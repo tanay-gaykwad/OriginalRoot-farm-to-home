@@ -143,6 +143,25 @@ def connect_db() -> sqlite3.Connection:
         )"""
     )
     connection.execute(
+        """CREATE TABLE IF NOT EXISTS customers (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            full_name TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            password_salt TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS customer_sessions (
+            token_hash TEXT PRIMARY KEY,
+            customer_id TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
         """CREATE TABLE IF NOT EXISTS operator_users (
             id TEXT PRIMARY KEY,
             username TEXT NOT NULL UNIQUE,
@@ -205,9 +224,11 @@ def connect_db() -> sqlite3.Connection:
         "delivery_code_hash": "TEXT NOT NULL DEFAULT ''",
         "proof_verified_at": "TEXT",
         "category": "TEXT NOT NULL DEFAULT 'unclassified'",
+        "customer_id": "TEXT",
     }.items():
         if column not in order_columns:
             connection.execute(f"ALTER TABLE harvest_orders ADD COLUMN {column} {definition}")
+    connection.execute("CREATE INDEX IF NOT EXISTS harvest_orders_customer_created_idx ON harvest_orders(customer_id, created_at DESC)")
     connection.execute(
         """CREATE TABLE IF NOT EXISTS harvest_order_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -414,6 +435,25 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         except (sqlite3.Error, ValueError):
             return None
 
+    def _customer_session(self) -> sqlite3.Row | None:
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+            morsel = cookie.get("OriginalRoot_customer_session")
+            if morsel is None:
+                return None
+            token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            with closing(connect_db()) as connection:
+                return connection.execute(
+                    """SELECT customers.id, customers.username, customers.full_name, customers.phone, customers.created_at
+                       FROM customer_sessions JOIN customers ON customers.id = customer_sessions.customer_id
+                       WHERE customer_sessions.token_hash = ? AND customer_sessions.expires_at > ?""",
+                    (token_hash, now),
+                ).fetchone()
+        except (sqlite3.Error, ValueError):
+            return None
+
     @staticmethod
     def _session_cookie(token: str, *, clear: bool = False, cookie_name: str = "OriginalRoot_session") -> str:
         secure = "; Secure" if os.environ.get("OriginalRoot_COOKIE_SECURE") == "1" else ""
@@ -447,6 +487,36 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 self._send_json(401, {"detail": "Sign in to your grower workspace"})
                 return
             self._send_json(200, {"grower": {"id": grower["id"], "username": grower["username"], "farm_name": grower["farm_name"]}})
+            return
+        if path == "/api/customer/me":
+            customer = self._customer_session()
+            if customer is None:
+                self._send_json(401, {"detail": "Sign in to your customer account"})
+                return
+            self._send_json(200, {"customer": {key: customer[key] for key in ("id", "username", "full_name", "phone", "created_at")}})
+            return
+        if path == "/api/customer/orders":
+            customer = self._customer_session()
+            if customer is None:
+                self._send_json(401, {"detail": "Sign in to view your orders"})
+                return
+            with closing(connect_db()) as connection:
+                rows = connection.execute(
+                    """SELECT reference, crop, category, farm_name, community, quantity, unit, total, status,
+                              fulfillment_method, created_at, updated_at
+                       FROM harvest_orders WHERE customer_id = ? ORDER BY created_at DESC""",
+                    (customer["id"],),
+                ).fetchall()
+                events = connection.execute(
+                    """SELECT e.order_reference, e.to_status, e.note, e.created_at
+                       FROM harvest_order_events e JOIN harvest_orders o ON o.reference = e.order_reference
+                       WHERE o.customer_id = ? ORDER BY e.id""",
+                    (customer["id"],),
+                ).fetchall()
+            event_map: dict[str, list[dict]] = {}
+            for event in events:
+                event_map.setdefault(event["order_reference"], []).append({key: event[key] for key in ("to_status", "note", "created_at")})
+            self._send_json(200, {"orders": [{**dict(row), "events": event_map.get(row["reference"], [])} for row in rows]})
             return
         if path == "/api/grower/listings":
             grower = self._grower_session()
@@ -658,6 +728,10 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 events = connection.execute("SELECT to_status, note, created_at FROM harvest_order_events WHERE order_reference = ? ORDER BY id", (reference,)).fetchall()
                 latest = connection.execute("SELECT note FROM harvest_order_events WHERE order_reference = ? ORDER BY id DESC LIMIT 1", (reference,)).fetchone()
             if row is None:
+                self._send_json(404, {"detail": "Order reference not found"})
+                return
+            customer = self._customer_session()
+            if customer is None or row["customer_id"] != customer["id"]:
                 self._send_json(404, {"detail": "Order reference not found"})
                 return
             self._send_json(200, {"reference": row["reference"], "crop": row["crop"], "category": row["category"], "quantity": row["quantity"], "unit": row["unit"], "total": row["total"], "status": row["status"], "fulfillment_method": row["fulfillment_method"], "latest_note": latest["note"] if latest else "", "events": [dict(event) for event in events], "created_at": row["created_at"], "updated_at": row["updated_at"]})
@@ -894,6 +968,97 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(200, {"id": operator_id, "is_active": is_active, "changed": True, "updated_at": now})
             return
+        if request_path == "/api/customer/register":
+            try:
+                payload = self._read_json()
+                full_name = payload.get("full_name")
+                phone = payload.get("phone")
+                username = payload.get("username")
+                password = payload.get("password")
+                if not isinstance(full_name, str) or not 2 <= len(full_name.strip()) <= 80:
+                    raise ValueError("Name must be 2 to 80 characters")
+                if not isinstance(phone, str) or not re.fullmatch(r"[6-9][0-9]{9}", phone):
+                    raise ValueError("Enter a valid 10-digit Indian mobile number")
+                if not isinstance(username, str) or not re.fullmatch(r"[a-zA-Z0-9_.-]{3,32}", username):
+                    raise ValueError("Username must be 3 to 32 letters, numbers, dots, dashes, or underscores")
+                if not isinstance(password, str) or not 12 <= len(password) <= 128:
+                    raise ValueError("Password must be 12 to 128 characters")
+                username = username.lower()
+                salt = secrets.token_hex(16)
+                password_hash = self._password_hash(password, salt)
+                customer_id = uuid.uuid4().hex
+                now = datetime.now(timezone.utc)
+                now_text = now.isoformat(timespec="seconds")
+                token, token_hash = self._session_token()
+                with closing(connect_db()) as connection, connection:
+                    connection.execute("DELETE FROM customer_sessions WHERE expires_at <= ?", (now_text,))
+                    connection.execute("INSERT INTO customers (id, username, full_name, phone, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (customer_id, username, full_name.strip(), phone, password_hash, salt, now_text))
+                    connection.execute("INSERT INTO customer_sessions (token_hash, customer_id, expires_at, created_at) VALUES (?, ?, ?, ?)", (token_hash, customer_id, (now + timedelta(days=7)).isoformat(timespec="seconds"), now_text))
+            except sqlite3.IntegrityError:
+                self._send_json(409, {"detail": "That username is already in use"})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            self._send_json(201, {"customer": {"id": customer_id, "username": username, "full_name": full_name.strip(), "phone": phone}}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_customer_session")})
+            return
+        if request_path == "/api/customer/login":
+            try:
+                payload = self._read_json()
+                username = payload.get("username")
+                password = payload.get("password")
+                if not isinstance(username, str) or not isinstance(password, str) or len(username) > 32 or len(password) > 128:
+                    raise ValueError("Enter a valid username and password")
+                with closing(connect_db()) as connection:
+                    account = connection.execute("SELECT id, username, full_name, phone, password_hash, password_salt FROM customers WHERE username = ?", (username.lower(),)).fetchone()
+                supplied_hash = self._password_hash(password, account["password_salt"] if account else "00" * 16)
+                if account is None or not hmac.compare_digest(supplied_hash, account["password_hash"]):
+                    self._send_json(401, {"detail": "Username or password is incorrect"})
+                    return
+                now = datetime.now(timezone.utc)
+                token, token_hash = self._session_token()
+                with closing(connect_db()) as connection, connection:
+                    connection.execute("DELETE FROM customer_sessions WHERE expires_at <= ?", (now.isoformat(timespec="seconds"),))
+                    connection.execute("INSERT INTO customer_sessions (token_hash, customer_id, expires_at, created_at) VALUES (?, ?, ?, ?)", (token_hash, account["id"], (now + timedelta(days=7)).isoformat(timespec="seconds"), now.isoformat(timespec="seconds")))
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            self._send_json(200, {"customer": {key: account[key] for key in ("id", "username", "full_name", "phone")}}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_customer_session")})
+            return
+        if request_path == "/api/customer/logout":
+            cookie = SimpleCookie()
+            try:
+                cookie.load(self.headers.get("Cookie", ""))
+                morsel = cookie.get("OriginalRoot_customer_session")
+                if morsel:
+                    token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
+                    with closing(connect_db()) as connection, connection:
+                        connection.execute("DELETE FROM customer_sessions WHERE token_hash = ?", (token_hash,))
+            except (sqlite3.Error, ValueError):
+                pass
+            self._send_json(200, {"status": "signed_out"}, {"Set-Cookie": self._session_cookie("", clear=True, cookie_name="OriginalRoot_customer_session")})
+            return
+        if request_path == "/api/orders/track":
+            try:
+                payload = self._read_json()
+                reference = payload.get("reference")
+                phone = payload.get("phone")
+                if not isinstance(reference, str) or not re.fullmatch(r"VAV-[0-9A-F]{16}", reference.upper()):
+                    raise ValueError("Enter a valid order reference")
+                reference = reference.upper()
+                customer = self._customer_session()
+                with closing(connect_db()) as connection:
+                    order = connection.execute("SELECT * FROM harvest_orders WHERE reference = ?", (reference,)).fetchone()
+                    if order is None or not ((customer is not None and order["customer_id"] == customer["id"]) or (isinstance(phone, str) and hmac.compare_digest(order["customer_phone"].encode("utf-8"), phone.encode("utf-8")))):
+                        self._send_json(404, {"detail": "We could not match that order and mobile number"})
+                        return
+                    events = connection.execute("SELECT to_status, note, created_at FROM harvest_order_events WHERE order_reference = ? ORDER BY id", (reference,)).fetchall()
+                    latest = connection.execute("SELECT note FROM harvest_order_events WHERE order_reference = ? ORDER BY id DESC LIMIT 1", (reference,)).fetchone()
+                self._send_json(200, {"reference": order["reference"], "crop": order["crop"], "category": order["category"], "quantity": order["quantity"], "unit": order["unit"], "total": order["total"], "status": order["status"], "fulfillment_method": order["fulfillment_method"], "latest_note": latest["note"] if latest else "", "events": [dict(event) for event in events], "created_at": order["created_at"], "updated_at": order["updated_at"]})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
         if request_path == "/api/grower/register":
             try:
                 payload = self._read_json()
@@ -1148,8 +1313,9 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             try:
                 payload = self._read_json()
                 listing_id = payload.get("listing_id")
-                customer_name = payload.get("customer_name")
-                customer_phone = payload.get("customer_phone")
+                customer = self._customer_session()
+                customer_name = customer["full_name"] if customer else payload.get("customer_name")
+                customer_phone = customer["phone"] if customer else payload.get("customer_phone")
                 community = payload.get("community")
                 quantity = payload.get("quantity")
                 fulfillment_method = payload.get("fulfillment_method", "pickup")
@@ -1196,9 +1362,9 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                         return
                     total = listing["buyer_price"] * quantity
                     connection.execute(
-                        """INSERT INTO harvest_orders (reference, listing_id, crop, category, farm_name, customer_name, customer_phone, community, quantity, unit, grower_payout, packing_cost, platform_fee, route_cost, total, status, created_at, updated_at, fulfillment_method, delivery_address, delivery_code_hash)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?)""",
-                        (reference, listing_id, listing["crop"], listing["category"], listing["farm_name"], customer_name.strip(), customer_phone, community, quantity, listing["unit"], listing["grower_payout"] * quantity, listing["packing_cost"] * quantity, listing["platform_fee"] * quantity, listing["route_cost"] * quantity, total, now, now, fulfillment_method, delivery_address.strip(), delivery_code_hash),
+                        """INSERT INTO harvest_orders (reference, listing_id, crop, category, farm_name, customer_name, customer_phone, community, quantity, unit, grower_payout, packing_cost, platform_fee, route_cost, total, status, created_at, updated_at, fulfillment_method, delivery_address, delivery_code_hash, customer_id)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?, ?)""",
+                        (reference, listing_id, listing["crop"], listing["category"], listing["farm_name"], customer_name.strip(), customer_phone, community, quantity, listing["unit"], listing["grower_payout"] * quantity, listing["packing_cost"] * quantity, listing["platform_fee"] * quantity, listing["route_cost"] * quantity, total, now, now, fulfillment_method, delivery_address.strip(), delivery_code_hash, customer["id"] if customer else None),
                     )
                     initial_note = "Customer requested local delivery; no payment was collected" if fulfillment_method == "delivery" else "Customer requested a pickup order; payment not collected"
                     connection.execute("INSERT INTO harvest_order_events (order_reference, from_status, to_status, note, created_at) VALUES (?, NULL, 'requested', ?, ?)", (reference, initial_note, now))
