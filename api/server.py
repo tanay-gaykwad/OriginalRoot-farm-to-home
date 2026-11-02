@@ -34,7 +34,11 @@ MAX_EVIDENCE_REQUEST_BYTES = 2_750_000
 EVIDENCE_MEDIA_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 OPERATOR_TOKEN = os.environ.get("OriginalRoot_OPERATOR_TOKEN", "")
 COMMUNITIES = {"Mysuru", "Mandya", "Srirangapatna"}
-UNITS = {"kg", "500 g", "250 g", "bunch", "dozen"}
+PRODUCT_CATEGORIES = {"fresh", "staples"}
+UNITS_BY_CATEGORY = {
+    "fresh": {"kg", "500 g", "250 g", "bunch", "dozen"},
+    "staples": {"kg", "quintal", "25 kg bag", "30 kg bag", "50 kg bag", "100 kg bag"},
+}
 SUPPORT_CATEGORIES = {"quality", "missing_or_wrong", "delivery", "damaged", "other"}
 SUPPORT_RESOLUTIONS = {"replacement_review", "refund_review", "contact_me"}
 SUPPORT_STATUSES = {"open", "investigating", "awaiting_customer", "resolved", "closed"}
@@ -95,6 +99,7 @@ def connect_db() -> sqlite3.Connection:
             unit TEXT NOT NULL,
             harvest_window TEXT NOT NULL,
             minimum_payout INTEGER NOT NULL,
+            category TEXT NOT NULL DEFAULT 'unclassified',
             status TEXT NOT NULL,
             approved_quantity INTEGER,
             grade TEXT,
@@ -109,6 +114,13 @@ def connect_db() -> sqlite3.Connection:
         )"""
     )
     listing_columns = {row["name"] for row in connection.execute("PRAGMA table_info(harvest_listings)")}
+    if "category" not in listing_columns:
+        connection.execute("ALTER TABLE harvest_listings ADD COLUMN category TEXT NOT NULL DEFAULT 'unclassified'")
+        connection.execute(
+            """UPDATE harvest_listings SET status='pending', decision_note='Classify this existing offer as fresh produce or grains, pulses, and oilseeds (staples), then review it again.',
+               approved_quantity=NULL, grade=NULL, grower_payout=NULL, packing_cost=NULL, platform_fee=NULL,
+               route_cost=NULL, buyer_price=NULL, reviewed_at=NULL WHERE status='published'"""
+        )
     if "grower_id" not in listing_columns:
         connection.execute("ALTER TABLE harvest_listings ADD COLUMN grower_id TEXT")
     connection.execute("CREATE INDEX IF NOT EXISTS harvest_listings_grower_id_idx ON harvest_listings(grower_id, created_at DESC)")
@@ -192,6 +204,7 @@ def connect_db() -> sqlite3.Connection:
         "delivery_address": "TEXT NOT NULL DEFAULT ''",
         "delivery_code_hash": "TEXT NOT NULL DEFAULT ''",
         "proof_verified_at": "TEXT",
+        "category": "TEXT NOT NULL DEFAULT 'unclassified'",
     }.items():
         if column not in order_columns:
             connection.execute(f"ALTER TABLE harvest_orders ADD COLUMN {column} {definition}")
@@ -441,7 +454,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 self._send_json(401, {"detail": "Sign in to view your harvest offers"})
                 return
             with closing(connect_db()) as connection:
-                rows = connection.execute("SELECT id, crop, community, available_quantity, unit, harvest_window, minimum_payout, status, approved_quantity, grade, grower_payout, buyer_price, decision_note, created_at, reviewed_at FROM harvest_listings WHERE grower_id = ? ORDER BY created_at DESC", (grower["id"],)).fetchall()
+                rows = connection.execute("SELECT id, crop, category, community, available_quantity, unit, harvest_window, minimum_payout, status, approved_quantity, grade, grower_payout, buyer_price, decision_note, created_at, reviewed_at FROM harvest_listings WHERE grower_id = ? ORDER BY created_at DESC", (grower["id"],)).fetchall()
             self._send_json(200, {"listings": [dict(row) for row in rows]})
             return
         if path == "/api/grower/evidence":
@@ -610,7 +623,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 self._send_json(404, {"detail": "Batch passport not found"})
                 return
             with closing(connect_db()) as connection:
-                listing = connection.execute("SELECT * FROM harvest_listings WHERE id = ? AND status = 'published'", (listing_id,)).fetchone()
+                listing = connection.execute("SELECT * FROM harvest_listings WHERE id = ? AND status = 'published' AND category IN ('fresh', 'staples')", (listing_id,)).fetchone()
                 events = connection.execute("SELECT event_type, location, detail, recorded_by, created_at FROM harvest_passport_events WHERE listing_id = ? ORDER BY rowid", (listing_id,)).fetchall()
                 evidence_rows = connection.execute(
                     """SELECT id, evidence_type, caption, media_type, byte_size, sha256, submitted_at, reviewed_at
@@ -620,7 +633,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             if listing is None:
                 self._send_json(404, {"detail": "Batch passport not found"})
                 return
-            passport = {key: listing[key] for key in ("id", "crop", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "reviewed_at")}
+            passport = {key: listing[key] for key in ("id", "crop", "category", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "reviewed_at")}
             published_evidence = [{**dict(item), "file_url": f"/api/evidence/{item['id']}/file", "reviewer_role": "OriginalRoot operator"} for item in evidence_rows]
             self._send_json(200, {"passport": passport, "events": [dict(event) for event in events], "evidence": published_evidence, "record_note": "An operator reviewed the listed evidence. This review is not independent certification and cannot guarantee that every claim is accurate. Other handling notes are operator-recorded."})
             return
@@ -647,7 +660,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             if row is None:
                 self._send_json(404, {"detail": "Order reference not found"})
                 return
-            self._send_json(200, {"reference": row["reference"], "crop": row["crop"], "quantity": row["quantity"], "unit": row["unit"], "total": row["total"], "status": row["status"], "fulfillment_method": row["fulfillment_method"], "latest_note": latest["note"] if latest else "", "events": [dict(event) for event in events], "created_at": row["created_at"], "updated_at": row["updated_at"]})
+            self._send_json(200, {"reference": row["reference"], "crop": row["crop"], "category": row["category"], "quantity": row["quantity"], "unit": row["unit"], "total": row["total"], "status": row["status"], "fulfillment_method": row["fulfillment_method"], "latest_note": latest["note"] if latest else "", "events": [dict(event) for event in events], "created_at": row["created_at"], "updated_at": row["updated_at"]})
             return
         if path == "/api/harvest-listings":
             params = dict(part.split("=", 1) for part in urlsplit(self.path).query.split("&") if "=" in part)
@@ -656,10 +669,10 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                     return
                 query = "SELECT * FROM harvest_listings WHERE status = 'pending' ORDER BY created_at"
             else:
-                query = "SELECT * FROM harvest_listings WHERE status = 'published' ORDER BY created_at DESC"
+                query = "SELECT * FROM harvest_listings WHERE status = 'published' AND category IN ('fresh', 'staples') ORDER BY created_at DESC"
             with closing(connect_db()) as connection:
                 rows = connection.execute(query).fetchall()
-                public_keys = ("id", "crop", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "reviewed_at")
+                public_keys = ("id", "crop", "category", "farm_name", "community", "approved_quantity", "unit", "harvest_window", "grade", "grower_payout", "packing_cost", "platform_fee", "route_cost", "buyer_price", "reviewed_at")
                 payloads = []
                 for row in rows:
                     if params.get("scope") == "review":
@@ -1172,6 +1185,10 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                         connection.rollback()
                         self._send_json(404, {"detail": "That harvest is no longer available in this community"})
                         return
+                    if listing["category"] not in PRODUCT_CATEGORIES:
+                        connection.rollback()
+                        self._send_json(409, {"detail": "This offer needs a category review before customer requests can be accepted"})
+                        return
                     reserved = connection.execute("SELECT COALESCE(SUM(quantity), 0) AS quantity FROM harvest_orders WHERE listing_id = ? AND status != 'cancelled'", (listing_id,)).fetchone()["quantity"]
                     if quantity > listing["approved_quantity"] - reserved:
                         connection.rollback()
@@ -1179,9 +1196,9 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                         return
                     total = listing["buyer_price"] * quantity
                     connection.execute(
-                        """INSERT INTO harvest_orders (reference, listing_id, crop, farm_name, customer_name, customer_phone, community, quantity, unit, grower_payout, packing_cost, platform_fee, route_cost, total, status, created_at, updated_at, fulfillment_method, delivery_address, delivery_code_hash)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?)""",
-                        (reference, listing_id, listing["crop"], listing["farm_name"], customer_name.strip(), customer_phone, community, quantity, listing["unit"], listing["grower_payout"] * quantity, listing["packing_cost"] * quantity, listing["platform_fee"] * quantity, listing["route_cost"] * quantity, total, now, now, fulfillment_method, delivery_address.strip(), delivery_code_hash),
+                        """INSERT INTO harvest_orders (reference, listing_id, crop, category, farm_name, customer_name, customer_phone, community, quantity, unit, grower_payout, packing_cost, platform_fee, route_cost, total, status, created_at, updated_at, fulfillment_method, delivery_address, delivery_code_hash)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?)""",
+                        (reference, listing_id, listing["crop"], listing["category"], listing["farm_name"], customer_name.strip(), customer_phone, community, quantity, listing["unit"], listing["grower_payout"] * quantity, listing["packing_cost"] * quantity, listing["platform_fee"] * quantity, listing["route_cost"] * quantity, total, now, now, fulfillment_method, delivery_address.strip(), delivery_code_hash),
                     )
                     initial_note = "Customer requested local delivery; no payment was collected" if fulfillment_method == "delivery" else "Customer requested a pickup order; payment not collected"
                     connection.execute("INSERT INTO harvest_order_events (order_reference, from_status, to_status, note, created_at) VALUES (?, NULL, 'requested', ?, ?)", (reference, initial_note, now))
@@ -1379,6 +1396,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             try:
                 payload = self._read_json()
                 crop = payload.get("crop")
+                category = payload.get("category")
                 community = payload.get("community")
                 quantity = payload.get("available_quantity")
                 unit = payload.get("unit")
@@ -1386,12 +1404,14 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 minimum_payout = payload.get("minimum_payout")
                 if not isinstance(crop, str) or not 2 <= len(crop.strip()) <= 60:
                     raise ValueError("Crop name must be 2 to 60 characters")
+                if not isinstance(category, str) or category not in PRODUCT_CATEGORIES:
+                    raise ValueError("Choose fresh produce or grains, pulses, and oilseeds (staples)")
                 if not isinstance(community, str) or community not in COMMUNITIES:
                     raise ValueError("Choose a supported pilot community")
                 if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 100_000:
                     raise ValueError("Available quantity must be between 1 and 100000")
-                if not isinstance(unit, str) or unit not in UNITS:
-                    raise ValueError("Choose a supported selling unit")
+                if not isinstance(unit, str) or unit not in UNITS_BY_CATEGORY[category]:
+                    raise ValueError("Choose a selling unit supported by this crop category")
                 if not isinstance(harvest_window, str) or harvest_window not in {"Within 3 days", "Within 1 week", "Already harvested"}:
                     raise ValueError("Choose a harvest window")
                 if isinstance(minimum_payout, bool) or not isinstance(minimum_payout, int) or not 1 <= minimum_payout <= 1_000_000:
@@ -1403,9 +1423,9 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             with closing(connect_db()) as connection, connection:
                 connection.execute(
                     """INSERT INTO harvest_listings
-                       (id, grower_id, crop, farm_name, community, available_quantity, unit, harvest_window, minimum_payout, status, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
-                    (listing_id, grower["id"], crop.strip(), grower["farm_name"], community, quantity, unit, harvest_window, minimum_payout, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+                       (id, grower_id, crop, farm_name, community, available_quantity, unit, harvest_window, minimum_payout, category, status, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                    (listing_id, grower["id"], crop.strip(), grower["farm_name"], community, quantity, unit, harvest_window, minimum_payout, category, datetime.now(timezone.utc).isoformat(timespec="seconds")),
                 )
                 row = connection.execute("SELECT * FROM harvest_listings WHERE id = ?", (listing_id,)).fetchone()
             self._send_json(201, {"listing": self._listing_payload(row), "message": "Offer submitted for review. It is not public until the grower-approved terms are confirmed."})
@@ -1428,6 +1448,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                     self._send_json(404, {"detail": "Pending harvest offer not found"})
                     return
                 if decision == "approve":
+                    category = payload.get("category")
                     quantity = payload.get("approved_quantity")
                     grade = payload.get("grade")
                     grower_payout = payload.get("grower_payout")
@@ -1439,6 +1460,8 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                         raise ValueError("Quantity and all price components must be whole rupee/integer amounts")
                     if not 1 <= quantity <= existing["available_quantity"]:
                         raise ValueError("Approved quantity must be within the grower's offered quantity")
+                    if not isinstance(category, str) or category not in PRODUCT_CATEGORIES:
+                        raise ValueError("Classify this offer as fresh produce or grains, pulses, and oilseeds (staples) before publishing")
                     if not isinstance(grade, str) or grade not in {"Grade A", "Grade B", "Mixed"}:
                         raise ValueError("Choose a supported grade")
                     if not existing["minimum_payout"] <= grower_payout <= 1_000_000:
@@ -1450,6 +1473,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 else:
                     if len(note.strip()) < 3:
                         raise ValueError("Add a short reason when declining an offer")
+                    category = None
                     quantity = grade = grower_payout = packing_cost = platform_fee = route_cost = buyer_price = None
                     status = "rejected"
             except ValueError as exc:
@@ -1458,9 +1482,9 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             reviewed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
             with closing(connect_db()) as connection, connection:
                 connection.execute(
-                    """UPDATE harvest_listings SET status=?, approved_quantity=?, grade=?, grower_payout=?, packing_cost=?,
+                    """UPDATE harvest_listings SET status=?, category=COALESCE(?, category), approved_quantity=?, grade=?, grower_payout=?, packing_cost=?,
                        platform_fee=?, route_cost=?, buyer_price=?, decision_note=?, reviewed_at=? WHERE id=? AND status='pending'""",
-                    (status, quantity, grade, grower_payout, packing_cost, platform_fee, route_cost, buyer_price, note.strip(), reviewed_at, listing_id),
+                    (status, category, quantity, grade, grower_payout, packing_cost, platform_fee, route_cost, buyer_price, note.strip(), reviewed_at, listing_id),
                 )
                 row = connection.execute("SELECT * FROM harvest_listings WHERE id = ?", (listing_id,)).fetchone()
             self._record_operator_audit(f"offer_{status}", "harvest_listing", listing_id, f"Offer {status}")

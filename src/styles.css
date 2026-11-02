@@ -121,6 +121,11 @@
 .approved-empty b { color: #3d5740; font-size: 12px; }
 .approved-empty small { max-width: 650px; color: #7b897d; font-size: 10px; line-height: 1.7; }
 .approved-empty .text-button { justify-self: start; margin-top: 4px; }
+.harvest-category-filter { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 14px; }
+.harvest-category-filter button { min-height: 34px; padding: 0 12px; border: 1px solid #dfe6da; border-radius: 20px; background: #fffefa; color: #718070; font: 600 10px Manrope,sans-serif; }
+.harvest-category-filter button.selected { border-color: #476c4d; background: #476c4d; color: #fff; }
+.harvest-category-pill { display: inline-flex; margin-top: 13px; padding: 4px 8px; border-radius: 20px; background: #edf3e9; color: #587653; font-size: 8px; font-weight: 700; }
+.approved-card .harvest-category-pill + h3 { margin-top: 7px; }
 .brand-site { min-height: 100vh; overflow: hidden; background: #fbfaf6; color: var(--ink); }
 .brand-topline { display: flex; min-height: 34px; align-items: center; justify-content: center; gap: 9px; padding: 5px 18px; background: #284d39; color: #e6eee3; font-size: 10px; letter-spacing: .1px; }
 .brand-topline > span:nth-child(2) { color: #97ad9b; }

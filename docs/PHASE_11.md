@@ -24,8 +24,8 @@ Do not invite the general public to place real orders until the platform has a h
 ## Remaining roadmap
 
 1. **Phase 12 — Operational app shell (complete):** the customer marketplace now reads approved offers from the connected API, distinguishes empty from offline states, and no longer offers a browser-only sample checkout. See [Phase 12](PHASE_12.md).
-2. **Phase 13 — Product and inventory system:** move crops, categories, grades, units, and stock from the static example catalog into operator-managed records. Support fresh produce and grains/pulses in the same catalog while allowing crop-specific grade and storage rules.
-3. **Phase 14 — Customer identity and order lifecycle:** add customer profiles and order history or a secure guest-order alternative, reliable cancellation, refunds, and account recovery.
+2. **Phase 13 — Crop groups and selling units (complete):** the offer lifecycle supports fresh produce and grains/pulses with API-validated units, customer filters, and safe re-review of unclassified legacy offers. See [Phase 13](PHASE_13.md).
+3. **Phase 14 — Customer identity and order lifecycle:** add customer profiles and private order history, cancellations, account recovery, and clear dispute outcomes.
 4. **Phase 15 — Production data foundation:** add database migrations, a managed hosted database, private object storage for evidence, automated encrypted off-site backups, monitoring, and environment-based secret management.
 5. **Phase 16 — Payments and settlement:** choose an appropriate provider, add server-side payment and refund APIs, settlement reconciliation, and clear grower payout records. Never place provider API secrets in browser code or Git.
 6. **Phase 17 — Pilot and public launch gates:** validate one real corridor with participating growers and customers, record delivery and complaint outcomes, review local legal/privacy/food-handling requirements, and only then widen access.

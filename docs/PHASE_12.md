@@ -18,9 +18,9 @@ This makes the customer request flow honest and connected for a locally hosted s
 
 ## Next build steps
 
-1. **Phase 13 — Product and inventory records:** create operator-managed crop, grade, unit, and stock records, with categories for fresh produce and grains/pulses.
+1. **Phase 13 — Crop groups and selling units (complete):** support fresh produce and grains/pulses in the same offer and order flow. See [Phase 13](PHASE_13.md).
 2. **Phase 14 — Customer identity and order lifecycle:** customer order history or protected guest access, cancellations, account recovery, and clear dispute outcomes.
-3. **Phase 15 — Production data foundation:** migrations, hosted database and API, private evidence storage, encrypted backups, monitoring, and a managed secret store.
+3. **Phase 15 — Production data foundation:** hosted database and API, private evidence storage, encrypted backups, monitoring, and a managed secret store.
 4. **Phase 16 — Payments and settlement:** integrate a suitable provider server-side, then record refunds and grower settlements with reconciliation.
 5. **Phase 17 — Corridor validation and release gates:** confirm real growers, grading, handling, transport, support, privacy, and local compliance before opening public orders.
 

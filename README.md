@@ -23,14 +23,15 @@ Read the [Windows installer guide](docs/DESKTOP_INSTALLER.md) for setup, first o
 
 ## Current scope
 
-The public homepage is the OriginalRoot brand introduction. The platform app is available through its **Explore OriginalRoot** action and at `/?platform=1`; its marketplace, grower, and operations workspaces have distinct shareable URLs. GitHub Pages has no shared API or database and reports that boundary in the marketplace. Docker and the Windows desktop app use a local API and SQLite database for grower offers and accounts, operator review, real order requests, delivery handoffs, batch records, and support tickets. The customer workspace only requests current, operator-approved grower offers; it has no online payment, SMS, or driver network. Keep the local service bound to loopback. See the [Phase 11 launch roadmap](docs/PHASE_11.md) and [Phase 12 marketplace boundary](docs/PHASE_12.md).
+The public homepage is the OriginalRoot brand introduction. The platform app is available through its **Explore OriginalRoot** action and at `/?platform=1`; its marketplace, grower, and operations workspaces have distinct shareable URLs. GitHub Pages has no shared API or database and reports that boundary in the marketplace. Docker and the Windows desktop app use a local API and SQLite database for grower offers and accounts, operator review, real order requests, delivery handoffs, batch records, and support tickets. Fresh produce and grains/pulses share one offer flow with category-aware units and customer filters. The customer workspace only requests current, operator-approved grower offers; it has no online payment, SMS, or driver network. Keep the local service bound to loopback. See the [Phase 11 launch roadmap](docs/PHASE_11.md), [Phase 12 marketplace boundary](docs/PHASE_12.md), and [Phase 13 crop categories and units](docs/PHASE_13.md).
 
 ## What you can explore
 
 - Browse only grower offers published after local operator review, with quantity, grade, and price breakdown visible.
+- Browse one offer board or filter fresh produce separately from grains, pulses, and oilseeds (staples). Selling units are validated for each group, including explicitly sized staple bags.
 - Request pickup or local delivery from an approved offer; orders reserve real offer quantity and await operator confirmation. No payment is taken.
 - Track an order by its reference through the local API.
-- Switch to the grower workspace and save a harvest-listing draft in the browser.
+- Create a grower account, submit crop offers, and follow their review status.
 - Run the combined static site and local order API with Docker Compose.
 - Submit an anonymous crop-demand signal for a nearby community. With the local API, only aggregate counts by crop and community are exposed; on GitHub Pages the signal stays in the visitor's browser.
 - Submit a grower harvest offer with an explicit minimum payout, review it in the operator console, and publish only after entering the confirmed grade and full price split.
@@ -63,6 +64,8 @@ Phase 10 adds owner-controlled operator suspension and reactivation, session rev
 Phase 11 separates the OriginalRoot brand introduction from the marketplace, grower, and operator workspaces. It also records what must be built and validated before a controlled pilot or public customer launch. See the [Phase 11 structure and launch roadmap](docs/PHASE_11.md).
 
 Phase 12 removes the browser-only sample basket and checkout path. The customer marketplace now uses reviewed offers from the connected API and distinguishes an empty market from a disconnected service. See the [Phase 12 marketplace boundary](docs/PHASE_12.md).
+
+Phase 13 adds Fresh produce and Staples to the grower offer, operator review, batch passport, and customer order flows. Category and selling-unit combinations are validated by the API; the customer board can filter both groups. See the [Phase 13 crop categories and units](docs/PHASE_13.md).
 
 ## Run locally
 
