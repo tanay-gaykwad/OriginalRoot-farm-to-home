@@ -14,6 +14,9 @@ import secrets
 import sqlite3
 import sys
 import uuid
+import urllib.error
+import urllib.parse
+import urllib.request
 from http.cookies import SimpleCookie
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -33,6 +36,8 @@ MAX_EVIDENCE_BYTES = 2_000_000
 MAX_EVIDENCE_REQUEST_BYTES = 2_750_000
 EVIDENCE_MEDIA_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 OPERATOR_TOKEN = os.environ.get("OriginalRoot_OPERATOR_TOKEN", "")
+DATA_GOV_IN_API_KEY = os.environ.get("OriginalRoot_DATA_GOV_IN_API_KEY", "").strip()
+MANDI_RESOURCE_ID = "9ef84268-d588-465a-a308-a864a43d0070"
 COMMUNITIES = {"Mysuru", "Mandya", "Srirangapatna"}
 PRODUCT_CATEGORIES = {"fresh", "staples"}
 UNITS_BY_CATEGORY = {
@@ -326,7 +331,7 @@ def json_bytes(value: object) -> bytes:
 
 
 class OriginalRootHandler(BaseHTTPRequestHandler):
-    server_version = "OriginalRootLocal/0.2"
+    server_version = "OriginalRootLocal/0.3"
 
     def _headers(self, status: int, content_type: str = "application/json; charset=utf-8") -> None:
         self.send_response(status)
@@ -483,11 +488,68 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
     def _listing_payload(row: sqlite3.Row) -> dict:
         return {key: row[key] for key in row.keys()}
 
+    def _market_prices(self) -> None:
+        """Fetch official daily wholesale mandi prices without exposing the API key."""
+        if not DATA_GOV_IN_API_KEY:
+            self._send_json(503, {
+                "detail": "Official mandi prices are not configured. Add OriginalRoot_DATA_GOV_IN_API_KEY to the server environment.",
+                "configured": False,
+                "source": "data.gov.in / AGMARKNET",
+            })
+            return
+
+        query = urllib.parse.parse_qs(urlsplit(self.path).query)
+        state = (query.get("state", [""])[0] or "").strip()[:80]
+        commodity = (query.get("commodity", [""])[0] or "").strip()[:80]
+        params = {
+            "api-key": DATA_GOV_IN_API_KEY,
+            "format": "json",
+            "limit": "100",
+            "offset": "0",
+            "sort[arrival_date]": "desc",
+        }
+        if state:
+            params["filters[state]"] = state
+        if commodity:
+            params["filters[commodity]"] = commodity
+        request = urllib.request.Request(
+            f"https://api.data.gov.in/resource/{MANDI_RESOURCE_ID}?{urllib.parse.urlencode(params)}",
+            headers={"Accept": "application/json", "User-Agent": "OriginalRoot/0.3"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read(2_000_000).decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("Unexpected response format")
+            records = payload.get("records", [])
+            if not isinstance(records, list):
+                raise ValueError("Unexpected records format")
+        except (urllib.error.URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            self._send_json(502, {
+                "detail": "The official mandi price service could not be reached. Please retry shortly.",
+                "configured": True,
+                "source": "data.gov.in / AGMARKNET",
+            })
+            return
+
+        self._send_json(200, {
+            "records": records,
+            "count": len(records),
+            "total": payload.get("total", len(records)),
+            "source": "data.gov.in / AGMARKNET",
+            "granularity": "daily",
+            "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "configured": True,
+        })
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = urlsplit(self.path).path
         if path == "/api/health":
             operator_ready = self._operator_account_exists()
             self._send_json(200, {"status": "ok", "mode": "local-pilot", "operator_review_enabled": operator_ready, "order_requests_enabled": operator_ready, "payments_enabled": False})
+            return
+        if path == "/api/market-prices":
+            self._market_prices()
             return
         if path == "/api/grower/me":
             grower = self._grower_session()

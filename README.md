@@ -25,7 +25,7 @@ See the [brand identity](docs/BRAND_IDENTITY.md) for the naming and visual direc
 
 ## Current scope
 
-The public homepage is the OriginalRoot brand introduction. The platform app is available through its **Explore OriginalRoot** action and at `/?platform=1`; its marketplace, grower, customer, and operations workspaces have distinct shareable URLs. GitHub Pages has no shared API or database and reports that boundary in the marketplace. Docker and the Windows desktop app use a local API and SQLite database for grower and customer accounts, private customer order history, operator review, real order requests, delivery handoffs, batch records, and support tickets. Fresh produce and grains/pulses share one offer flow with category-aware units and customer filters. Customers may order as guests or sign in; guest tracking requires their order reference and checkout mobile number. Customers can cancel before an operator accepts the request, edit their profile, and download their account-linked order and support data. Customer accounts include password hashing, basic sign-in throttling, and password change with session revocation. Mobile numbers are not OTP-verified, and the platform has no online payment, SMS, or driver network. Keep the local service bound to loopback. See the [Phase 11 launch roadmap](docs/PHASE_11.md), [Phase 12 marketplace boundary](docs/PHASE_12.md), [Phase 13 crop categories and units](docs/PHASE_13.md), [Phase 14 customer accounts](docs/PHASE_14.md), [Phase 15 account security](docs/PHASE_15.md), [Phase 16 customer order control](docs/PHASE_16.md), and [Phase 17 customer data access](docs/PHASE_17.md).
+The public homepage introduces OriginalRoot and links into a service hub covering harvest offers, mandi prices, direct orders, batch records, local fulfilment, and anonymous community demand planning. The platform app is available through its **Explore OriginalRoot** action and at `/?platform=1`; its marketplace, public market prices, grower, customer, and operations workspaces have distinct shareable URLs. GitHub Pages has no shared API or database and reports that boundary in the marketplace. Docker and the Windows desktop app use a local API and SQLite database for grower and customer accounts, private customer order history, operator review, real order requests, delivery handoffs, batch records, and support tickets. Fresh produce and grains/pulses share one offer flow with category-aware units and customer filters. Customers may order as guests or sign in; guest tracking requires their order reference and checkout mobile number. Customers can cancel before an operator accepts the request, edit their profile, and download their account-linked order and support data. Customer accounts include password hashing, basic sign-in throttling, and password change with session revocation. Mobile numbers are not OTP-verified, and the platform has no online payment, SMS, or driver network. The grower workspace brings offer summaries, listings, pooled anonymous household-interest totals, and a daily mandi reference table together; the mandi API key stays server-side. Keep the local service bound to loopback. See the [Phase 11 launch roadmap](docs/PHASE_11.md), [Phase 12 marketplace boundary](docs/PHASE_12.md), [Phase 13 crop categories and units](docs/PHASE_13.md), [Phase 14 customer accounts](docs/PHASE_14.md), [Phase 15 account security](docs/PHASE_15.md), [Phase 16 customer order control](docs/PHASE_16.md), [Phase 17 customer data access](docs/PHASE_17.md), and [Phase 18 grower dashboard and mandi prices](docs/PHASE_18.md).
 
 ## What you can explore
 
@@ -35,6 +35,7 @@ The public homepage is the OriginalRoot brand introduction. The platform app is 
 - Track a guest order with its reference and checkout mobile number, or view account-linked requests in My orders.
 - Create a customer account, place account-linked requests, and view private order history; guest requests remain supported.
 - Create a grower account, submit crop offers, and follow their review status.
+- Compare daily mandi min/modal/max wholesale references from the Government of India's data.gov.in dataset. The API key is optional, configured on the server, and never exposed to the browser; without it, the price workspace explains how to enable the feed.
 - Run the combined static site and local order API with Docker Compose.
 - Submit an anonymous crop-demand signal for a nearby community. With the local API, only aggregate counts by crop and community are exposed; on GitHub Pages the signal stays in the visitor's browser.
 - Submit a grower harvest offer with an explicit minimum payout, review it in the operator console, and publish only after entering the confirmed grade and full price split.
@@ -78,6 +79,8 @@ Phase 16 lets customers cancel an order request before an operator accepts it. A
 
 Phase 17 lets customers update profile details and download their account-linked order and support data. It preserves each order's original contact snapshot and does not claim that mobile numbers are verified. See the [Phase 17 customer data access](docs/PHASE_17.md).
 
+Phase 18 gives growers a workspace dashboard for their own offers and adds a filtered daily wholesale mandi reference from the Government of India's data.gov.in API. The key stays in the server environment; no example prices or predicted trends are shown as live data. See the [Phase 18 grower dashboard and mandi prices](docs/PHASE_18.md).
+
 ## Run locally
 
 Run these commands from the project root:
@@ -118,6 +121,8 @@ Copy-Item .env.example .env
 docker compose up --build -d
 docker compose ps
 ```
+
+To enable official mandi prices, add a data.gov.in API key to `.env` as `OriginalRoot_DATA_GOV_IN_API_KEY`, then recreate the service with `docker compose up -d --force-recreate`. Price rows are daily wholesale references; they are not predictions or guaranteed farm-gate offers.
 
 Open `http://127.0.0.1:8080`. In Operations, use the key from `.env` once to create the owner account, then sign in with that account. The owner can provision named operator accounts; the bootstrap key is not used for normal reviews. App data is stored in the `OriginalRoot-data` Docker volume. The app is available only on this computer; the published container port is bound to loopback. Stop it with `docker compose down`; use `docker compose down -v` only if you intend to erase its database volume.
 

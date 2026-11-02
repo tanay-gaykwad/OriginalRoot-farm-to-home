@@ -8,6 +8,7 @@ services:
       OriginalRoot_PORT: 8080
       OriginalRoot_DB_PATH: /data/OriginalRoot.sqlite3
       OriginalRoot_OPERATOR_TOKEN: ${OriginalRoot_OPERATOR_TOKEN:-}
+      OriginalRoot_DATA_GOV_IN_API_KEY: ${OriginalRoot_DATA_GOV_IN_API_KEY:-}
     volumes:
       - OriginalRoot-data:/data
     healthcheck:

@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { ArrowDownRight, ArrowRight, BadgeCheck, ChevronDown, CircleCheck, Eye, HandCoins, Leaf, MapPin, PackageCheck, Sprout, Truck, Wheat } from "lucide-react";
+import { ArrowDownRight, ArrowRight, BadgeCheck, BarChart3, ChevronDown, CircleCheck, ClipboardCheck, Eye, HandCoins, Leaf, MapPin, PackageCheck, ShieldCheck, ShoppingBasket, Sprout, Truck, Wheat } from "lucide-react";
 
-type Workspace = "shop" | "grower" | "customer" | "operator";
+type Workspace = "shop" | "prices" | "grower" | "customer" | "operator";
 
-function platformHref(workspace: Workspace = "shop") {
+function platformHref(workspace: Workspace = "shop", feature?: string) {
   const url = new URL(window.location.href);
-  url.search = new URLSearchParams({ platform: "1", workspace }).toString();
+  const params = new URLSearchParams({ platform: "1", workspace });
+  if (feature) params.set("feature", feature);
+  url.search = params.toString();
   url.hash = "";
   return `${url.pathname}${url.search}`;
 }
@@ -31,7 +33,7 @@ export function BrandSite() {
       <BrandLogo />
       <button className="ks-menu-button" aria-expanded={menuOpen} aria-label="Toggle navigation" onClick={() => setMenuOpen(!menuOpen)}><span /><span /></button>
       <nav className={menuOpen ? "ks-nav ks-nav-open" : "ks-nav"} aria-label="Main navigation">
-        <a href="#why" onClick={() => setMenuOpen(false)}>Why this exists</a><a href="#how" onClick={() => setMenuOpen(false)}>How it works</a><a href="#for-whom" onClick={() => setMenuOpen(false)}>For everyone</a>
+        <a href="#services" onClick={() => setMenuOpen(false)}>Services</a><a href={platformHref("prices")} onClick={() => setMenuOpen(false)}>Market prices</a><a href="#how" onClick={() => setMenuOpen(false)}>How it works</a><a href="#for-whom" onClick={() => setMenuOpen(false)}>For everyone</a>
       </nav>
       <a className="ks-header-cta" href={platformHref()}>Open the market <ArrowRight size={15} /></a>
     </header>
@@ -55,6 +57,15 @@ export function BrandSite() {
       </section>
 
       <section className="ks-thesis" id="why"><div className="ks-thesis-inner"><span className="ks-index">THE IDEA</span><h2>When the only buyer at harvest is the local trader, a farmer may have to sell before the price feels fair.</h2><p>OriginalRoot gives growers another route to nearby households—while keeping storage, grading, packing and delivery visible as real work with real costs.</p><a href="#how">See what changes <ArrowRight size={14} /></a></div><div className="ks-thesis-note"><span className="ks-note-symbol"><HandCoins size={20} /></span><b>Fair access is built in the open.</b><small>We don’t rely on hiding costs or creating artificial scarcity. Availability and timing follow the harvest and the capacity to handle it well.</small></div></section>
+
+      <section className="ks-services" id="services"><div className="ks-section-head"><div><span className="ks-eyebrow"><span /> The OriginalRoot platform</span><h2>Useful tools for the<br /><em>whole harvest route.</em></h2></div><p>One connected workspace for growing, buying, reviewing, and moving produce—with clear boundaries around every claim.</p></div><div className="ks-service-grid">
+        <article><span className="ks-service-icon"><Sprout size={19} /></span><small>FOR GROWERS</small><h3>Sell a harvest</h3><p>Set the crop, quantity, harvest window, and minimum payout you will accept.</p><a href={platformHref("grower")}>Open grower workspace <ArrowRight size={14} /></a></article>
+        <article><span className="ks-service-icon"><BarChart3 size={19} /></span><small>DAILY REFERENCE</small><h3>Check mandi prices</h3><p>Compare official daily wholesale ranges by state and commodity.</p><a href={platformHref("prices")}>View market prices <ArrowRight size={14} /></a></article>
+        <article><span className="ks-service-icon"><ShoppingBasket size={19} /></span><small>FOR HOUSEHOLDS</small><h3>Buy direct harvests</h3><p>Browse reviewed local offers and request available quantities from growers.</p><a href={platformHref("shop")}>Browse the marketplace <ArrowRight size={14} /></a></article>
+        <article><span className="ks-service-icon"><PackageCheck size={19} /></span><small>ORIGIN & HANDLING</small><h3>Follow a batch record</h3><p>See recorded offer, grade, price split, handling, and delivery checkpoints.</p><a href={platformHref("shop")}>Explore farm records <ArrowRight size={14} /></a></article>
+        <article><span className="ks-service-icon"><ClipboardCheck size={19} /></span><small>FOR LOCAL TEAMS</small><h3>Coordinate orders</h3><p>Review harvest offers, confirm fulfilment, and record the handoff.</p><a href={platformHref("operator")}>Open local operations <ArrowRight size={14} /></a></article>
+        <article><span className="ks-service-icon"><ShieldCheck size={19} /></span><small>COMMUNITY PLANNING</small><h3>Pool household interest</h3><p>Anonymous neighborhood signals help growers see what families hope to buy.</p><a href={platformHref("shop", "demand")}>Share what you need <ArrowRight size={14} /></a></article>
+      </div><p className="ks-services-note">Some tools need the local OriginalRoot service and approved records. Market prices use the official daily source when a data.gov.in key is configured.</p></section>
 
       <section className="ks-how" id="how"><div className="ks-section-head"><div><span className="ks-eyebrow"><span /> A clear path, step by step</span><h2>From offer to <em>front door.</em></h2></div><p>Technology keeps the record together. Growers and local teams still make the decisions and do the work.</p></div>
         <div className="ks-how-grid"><div className="ks-step-list" role="tablist" aria-label="Explore the harvest journey">{stories.map((item, index) => { const Icon = item.Icon; return <button key={item.eyebrow} role="tab" aria-selected={activeStory === index} className={activeStory === index ? "ks-step active" : "ks-step"} onClick={() => setActiveStory(index)}><span className="ks-step-num">0{index + 1}</span><span className="ks-step-icon"><Icon size={17} /></span><span className="ks-step-title">{item.title}</span><ArrowRight className="ks-step-arrow" size={15} /></button>; })}</div>
