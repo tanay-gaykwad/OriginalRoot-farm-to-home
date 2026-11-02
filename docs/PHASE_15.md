@@ -9,7 +9,7 @@
 
 ## Operational boundary
 
-The local Docker deployment is intended for a controlled workspace. If placed behind a proxy, configure the network boundary so the API sees a trusted client address; it does not accept an untrusted forwarded-address header. Account recovery, verified contact details, multi-factor authentication, alerts, and a managed production identity service remain future work. Keep `OriginalRoot_COOKIE_SECURE=1` when the service is exposed over HTTPS.
+The local Docker deployment is intended for a controlled workspace. If placed behind a proxy, configure the network boundary so the API sees a trusted client address; it does not accept an untrusted forwarded-address header. Account recovery, verified contact details, multi-factor authentication, alerts, and a managed production identity service remain future work. Keep `ORIGINALROOT_COOKIE_SECURE=1` when the service is exposed over HTTPS.
 
 The IP-based limit can affect multiple users sharing one public address. It is a modest local safeguard, not a substitute for a production identity provider, WAF, or abuse-monitoring service.
 

@@ -34,7 +34,7 @@ export function BatchPassportModal({ listing, onClose }: { listing: PublishedOff
   const batch = record?.passport;
   return <div className="modal-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="passport-modal phase-four-passport" aria-labelledby="passport-title">
     <button className="modal-close icon-button" onClick={onClose} aria-label="Close batch passport"><X size={19} /></button>
-    <div className="passport-cover"><span className="passport-kicker"><QrCode size={15} /> OriginalRoot BATCH RECORD</span><span className="passport-emoji">🌾</span><span className="passport-batch">{listing.id}</span></div>
+    <div className="passport-cover"><span className="passport-kicker"><QrCode size={15} /> ORIGINALROOT BATCH RECORD</span><span className="passport-emoji">🌾</span><span className="passport-batch">{listing.id}</span></div>
     <div className="passport-content">
       <div className="passport-title-row"><div><span className="eyebrow">{listing.category === "staples" ? "Staples" : "Fresh produce"} · Traceable harvest record</span><h2 id="passport-title">{batch?.crop || listing.crop}</h2><p>{batch?.farm_name || listing.farm_name} · {batch?.community || listing.community}</p></div><span className="grade-pill">{batch?.grade || listing.grade}</span></div>
       {error && <div className="operator-error" role="alert">{error}</div>}

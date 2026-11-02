@@ -18,7 +18,7 @@ Build the supply-side workflow that turns a grower's proposed harvest into a cle
 Set a long random bootstrap key in the API server environment before starting the app. In the current application, use it once in Operations to create the workspace owner; routine reviews use an individual operator account.
 
 ```powershell
-$env:OriginalRoot_OPERATOR_TOKEN = "replace-with-a-long-random-secret"
+$env:ORIGINALROOT_OPERATOR_TOKEN = "replace-with-a-long-random-secret"
 python api/server.py
 ```
 

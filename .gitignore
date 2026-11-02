@@ -6,6 +6,7 @@ artifacts/
 .build/
 .data/
 OriginalRoot-backups/
+originalroot-backups/
 .venv/
 __pycache__/
 *.py[cod]

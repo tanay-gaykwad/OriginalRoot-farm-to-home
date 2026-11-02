@@ -1,6 +1,6 @@
 # OriginalRoot
 
-OriginalRoot is a farmer-to-home marketplace and operations platform for growers, customers, and local teams. It connects grower harvest offers to customer orders, records batch checkpoints and price splits, and includes local delivery, account workspaces, and support handling. The name joins *khet* (field) with *sangam* (meeting point): the product is a place where growers and nearby households meet around a clear, shared harvest record.
+OriginalRoot is a farmer-to-home marketplace and operations platform for growers, customers, and local teams. It connects grower harvest offers to customer orders, records batch checkpoints and price splits, and includes local delivery, account workspaces, and support handling. The name points to the source of food and the growers and soil behind it.
 
 [![Build](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/build.yml)
 [![Pages preview](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/pages.yml/badge.svg?branch=main)](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/pages.yml)
@@ -11,7 +11,7 @@ Open the [OriginalRoot website](https://tanay-gaykwad.github.io/originalroot-far
 
 To try the working local workflows, start OriginalRoot with Docker Compose using the steps below. The marketplace, grower accounts, operator review, order tracking, and support queue then share a local SQLite database.
 
-For a Windows desktop installer, download the latest `OriginalRoot-Setup` `.exe` from [GitHub Releases](https://github.com/tanay-gaykwad/originalroot-farm-to-home/releases). It installs a local desktop app that starts its API on loopback and stores its database in the current Windows user's app data. On first launch, copy the generated one-time key and use it in Operations to create the owner account. The installer is not code-signed, so Windows may show an unknown-publisher warning or a managed device may block it.
+For a Windows desktop installer, download the latest `OriginalRoot-Setup` `.exe` from [GitHub Releases](https://github.com/tanay-gaykwad/originalroot-farm-to-home/releases). It installs a local desktop app that starts its API on loopback and stores its database in the current Windows user's app data. When upgrading from OriginalRoot or OriginalRoot, the app copies the existing local data into OriginalRoot on first launch and leaves the prior folder in place until you verify the upgrade. On first setup, copy the generated one-time key and use it in Operations to create the owner account. The installer is not code-signed, so Windows may show an unknown-publisher warning or a managed device may block it.
 
 Read the [Windows installer guide](docs/DESKTOP_INSTALLER.md) for setup, first owner access, and local data backup steps.
 
@@ -94,7 +94,7 @@ pnpm install --frozen-lockfile
 Start the local API in one terminal:
 
 ```powershell
-$env:OriginalRoot_OPERATOR_TOKEN = "replace-with-a-long-random-bootstrap-key"
+$env:ORIGINALROOT_OPERATOR_TOKEN = "replace-with-a-long-random-bootstrap-key"
 python api/server.py
 ```
 
@@ -124,7 +124,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-To enable official mandi prices, add a data.gov.in API key to `.env` as `OriginalRoot_DATA_GOV_IN_API_KEY`, then recreate the service with `docker compose up -d --force-recreate`. Price rows are daily wholesale references; they are not predictions or guaranteed farm-gate offers.
+To enable official mandi prices, add a data.gov.in API key to `.env` as `ORIGINALROOT_DATA_GOV_IN_API_KEY`, then recreate the service with `docker compose up -d --force-recreate`. Price rows are daily wholesale references; they are not predictions or guaranteed farm-gate offers.
 
 Open `http://127.0.0.1:8080`. In Operations, use the key from `.env` once to create the owner account, then sign in with that account. The owner can provision named operator accounts; the bootstrap key is not used for normal reviews. App data is stored in the `OriginalRoot-data` Docker volume. The app is available only on this computer; the published container port is bound to loopback. Stop it with `docker compose down`; use `docker compose down -v` only if you intend to erase its database volume.
 

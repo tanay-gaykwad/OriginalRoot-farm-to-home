@@ -10,7 +10,7 @@
 ## Daily wholesale references
 
 - The workspace can fetch daily minimum, modal, and maximum mandi prices from the Government of India's data.gov.in / AGMARKNET dataset.
-- State and commodity filters are sent to a same-origin backend route. The data.gov.in key is read only from `OriginalRoot_DATA_GOV_IN_API_KEY`; it is never sent to the browser or returned by the API.
+- State and commodity filters are sent to a same-origin backend route. The data.gov.in key is read only from `ORIGINALROOT_DATA_GOV_IN_API_KEY`; it is never sent to the browser or returned by the API.
 - A missing key, upstream outage, empty result, and successful response have separate UI states. There are no hard-coded sample rows, predictions, or trend claims.
 - Values and arrival dates are displayed as published by the source. Grower payout and farm-gate rates may differ by grade, lot size, transport, and timing.
 
@@ -23,7 +23,7 @@
 ## Setup
 
 1. Create an API key through the official [data.gov.in account/API setup](https://www.data.gov.in/help).
-2. Add `OriginalRoot_DATA_GOV_IN_API_KEY=your-key` to the local `.env` file. Do not commit `.env` or paste the key into frontend settings.
+2. Add `ORIGINALROOT_DATA_GOV_IN_API_KEY=your-key` to the local `.env` file. Do not commit `.env` or paste the key into frontend settings.
 3. Recreate the service with `docker compose up -d --force-recreate`.
 4. Open the grower workspace and choose **Market prices**.
 

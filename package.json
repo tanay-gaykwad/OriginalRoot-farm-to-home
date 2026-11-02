@@ -1,17 +1,17 @@
 {
-  "name": "OriginalRoot-farm-to-home",
+  "name": "originalroot-farm-to-home",
   "description": "A farmer-to-home marketplace with transparent harvest and order records.",
   "author": "OriginalRoot",
   "private": true,
   "packageManager": "pnpm@11.25.0",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "build:pages": "tsc -b && vite build --mode pages",
-    "dist:win": "pnpm build && pyinstaller --noconfirm --clean --onefile --name OriginalRoot-api --paths \"%CD%\" --add-data \"%CD%\\dist;dist\" --add-data \"%CD%\\src\\catalog.json;src\" --distpath artifacts/backend --workpath .build/pyinstaller --specpath .build packaging/api_entry.py && electron-builder --win nsis --x64 --publish never"
+    "dist:win": "pnpm build && pyinstaller --noconfirm --clean --onefile --name originalroot-api --paths \"%CD%\" --add-data \"%CD%\\dist;dist\" --add-data \"%CD%\\src\\catalog.json;src\" --distpath artifacts/backend --workpath .build/pyinstaller --specpath .build packaging/api_entry.py && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
@@ -41,8 +41,8 @@
     ],
     "extraResources": [
       {
-        "from": "artifacts/backend/OriginalRoot-api.exe",
-        "to": "OriginalRoot-api.exe"
+        "from": "artifacts/backend/originalroot-api.exe",
+        "to": "originalroot-api.exe"
       },
       {
         "from": "dist",
@@ -54,6 +54,7 @@
       }
     ],
     "win": {
+      "icon": "build/originalroot-icon.ico",
       "target": ["nsis"],
       "artifactName": "OriginalRoot-Setup-${version}-${arch}.${ext}"
     },

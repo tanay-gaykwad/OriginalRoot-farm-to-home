@@ -16,7 +16,7 @@ Requirements: Node.js 22, pnpm 11.25.0, and Python 3.12. Docker Desktop is neede
 
 ```powershell
 pnpm install --frozen-lockfile
-$env:OriginalRoot_OPERATOR_TOKEN = "use-a-long-random-local-key"
+$env:ORIGINALROOT_OPERATOR_TOKEN = "use-a-long-random-local-key"
 python api/server.py
 ```
 

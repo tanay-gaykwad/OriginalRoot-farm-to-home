@@ -9,10 +9,10 @@ The first launch generates a random one-time setup key for the first owner accou
 OriginalRoot runs its API on a loopback-only address. The desktop app stores the SQLite database, evidence images, and setup data in:
 
 ```text
-%APPDATA%\originalroot-farm-to-home\data
+%APPDATA%\OriginalRoot\data
 ```
 
-Uninstalling OriginalRoot leaves this data folder in place. Back up the folder before uninstalling or moving to another computer.
+When upgrading from an earlier install, close the previous app and make a backup first. OriginalRoot copies the existing data folder and database into its new app-data folder on first launch; it leaves the previous folder in place until you confirm the new install has your records. Uninstalling OriginalRoot leaves its data folder in place. Back up the folder before uninstalling or moving to another computer.
 
 ## Back up and restore
 

@@ -86,7 +86,7 @@ export function CustomerWorkspace({ onShop }: { onShop: () => void }) {
       const blob = await response.blob();
       const href = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
-      anchor.href = href; anchor.download = `OriginalRoot-account-data-${new Date().toISOString().slice(0, 10)}.json`; anchor.click();
+      anchor.href = href; anchor.download = `originalroot-account-data-${new Date().toISOString().slice(0, 10)}.json`; anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(href), 1000); setNotice("Your account data download is ready.");
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not download account data."); }
     setBusy(false);

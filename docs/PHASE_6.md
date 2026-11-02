@@ -6,7 +6,7 @@ Replace the shared operator key as routine access with individual operator accou
 
 ## Included
 
-- One-time owner setup protected by the configured `OriginalRoot_OPERATOR_TOKEN` bootstrap key.
+- One-time owner setup protected by the configured `ORIGINALROOT_OPERATOR_TOKEN` bootstrap key.
 - Individual operator sign-in/sign-out and seven-day HTTP-only, SameSite=Strict sessions; sessions are stored as token hashes.
 - Salted PBKDF2-HMAC-SHA256 password hashes; password changes require the current password and revoke the user's other sessions.
 - Owner-only creation of additional operator accounts. Review and order actions are available to owner and operator roles.
@@ -16,7 +16,7 @@ Replace the shared operator key as routine access with individual operator accou
 
 ## First operator setup
 
-1. Set a strong `OriginalRoot_OPERATOR_TOKEN` in `.env` and run `docker compose up --build -d`.
+1. Set a strong `ORIGINALROOT_OPERATOR_TOKEN` in `.env` and run `docker compose up --build -d`.
 2. Open the Operations view and enter the bootstrap key once to create the owner username and password.
 3. Sign in later with that individual account. The bootstrap key is not accepted for ongoing operations.
 4. The owner can provision staff accounts and each operator should change their password after receiving it.

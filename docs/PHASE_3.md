@@ -16,7 +16,7 @@ Let a customer request an approved harvest for pickup, reserve only available qu
 
 ## Local setup
 
-Set `OriginalRoot_OPERATOR_TOKEN` before starting the API (see [Phase 2 setup](PHASE_2.md)). It is used once to bootstrap the first operator account; later order management requires an individual operator session. Order requests remain disabled until the first operator account exists. The local API is bound to loopback by default; order contact details are written to the local SQLite database and must be handled as private data.
+Set `ORIGINALROOT_OPERATOR_TOKEN` before starting the API (see [Phase 2 setup](PHASE_2.md)). It is used once to bootstrap the first operator account; later order management requires an individual operator session. Order requests remain disabled until the first operator account exists. The local API is bound to loopback by default; order contact details are written to the local SQLite database and must be handled as private data.
 
 ## Hosted site boundary
 

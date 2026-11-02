@@ -13,6 +13,22 @@ let apiStderr = "";
 let bootstrapKey;
 let setupWatchTimer;
 
+const applicationDataRoot = app.getPath("appData");
+app.setPath("userData", path.join(applicationDataRoot, "OriginalRoot"));
+
+function migrateLegacyDataDirectory() {
+  const currentData = path.join(app.getPath("userData"), "data");
+  if (fs.existsSync(path.join(currentData, "originalroot.sqlite3")) || fs.existsSync(path.join(currentData, "OriginalRoot.sqlite3"))) return;
+
+  for (const previousName of ["OriginalRoot", "OriginalRoot-farm-to-home", "originalroot-farm-to-home"]) {
+    const previousData = path.join(applicationDataRoot, previousName, "data");
+    if (!fs.existsSync(previousData)) continue;
+    fs.mkdirSync(path.dirname(currentData), { recursive: true });
+    fs.cpSync(previousData, currentData, { recursive: true, force: false, errorOnExist: false });
+    return;
+  }
+}
+
 function writeStartupLog(message) {
   try {
     const directory = path.join(app.getPath("userData"), "data");
@@ -54,19 +70,19 @@ function startApi(port) {
   const dataDirectory = path.join(app.getPath("userData"), "data");
   const environment = {
     ...process.env,
-    OriginalRoot_HOST: "127.0.0.1",
-    OriginalRoot_PORT: String(port),
+    ORIGINALROOT_HOST: "127.0.0.1",
+    ORIGINALROOT_PORT: String(port),
     PYTHONUNBUFFERED: "1",
-    OriginalRoot_OPERATOR_TOKEN: bootstrapKey,
-    OriginalRoot_DB_PATH: path.join(dataDirectory, "OriginalRoot.sqlite3"),
-    OriginalRoot_ROOT: app.isPackaged
+    ORIGINALROOT_OPERATOR_TOKEN: bootstrapKey,
+    ORIGINALROOT_DB_PATH: path.join(dataDirectory, "originalroot.sqlite3"),
+    ORIGINALROOT_ROOT: app.isPackaged
       ? path.join(process.resourcesPath, "app-assets")
       : path.resolve(__dirname, ".."),
   };
 
   if (app.isPackaged) {
-    const apiExecutable = path.join(process.resourcesPath, "OriginalRoot-api.exe");
-    writeStartupLog(`Starting bundled service on 127.0.0.1:${port}; executable exists=${fs.existsSync(apiExecutable)}; assets exist=${fs.existsSync(environment.OriginalRoot_ROOT)}`);
+    const apiExecutable = path.join(process.resourcesPath, "originalroot-api.exe");
+    writeStartupLog(`Starting bundled service on 127.0.0.1:${port}; executable exists=${fs.existsSync(apiExecutable)}; assets exist=${fs.existsSync(environment.ORIGINALROOT_ROOT)}`);
     apiProcess = spawn(apiExecutable, [], {
       env: environment,
       windowsHide: true,
@@ -115,6 +131,7 @@ async function waitForApi(port) {
 }
 
 async function createWindow() {
+  migrateLegacyDataDirectory();
   bootstrapKey = getBootstrapKey();
   apiPort = await availablePort();
   startApi(apiPort);

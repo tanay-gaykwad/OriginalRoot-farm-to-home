@@ -18,14 +18,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-DATA_PATH = Path(os.environ.get("OriginalRoot_DB_PATH", Path(__file__).resolve().parents[1] / ".data" / "OriginalRoot.sqlite3"))
+DATA_PATH = Path(os.environ.get("ORIGINALROOT_DB_PATH") or os.environ.get("OriginalRoot_DB_PATH") or Path(__file__).resolve().parents[1] / ".data" / "originalroot.sqlite3")
 DATA_DIR = DATA_PATH.parent
 EVIDENCE_PATH = DATA_DIR / "evidence"
 BACKUP_DIR = DATA_DIR / "backups"
 MAX_EVIDENCE_BYTES = 2_000_000
 MAX_DATABASE_BYTES = 2_000_000_000
 EVIDENCE_NAME = re.compile(r"EVD-[0-9A-F]{16}\.(?:jpg|png|webp)\Z")
-FORMAT_VERSION = "OriginalRoot-data-bundle-v1"
+FORMAT_VERSION = "originalroot-data-bundle-v2"
+LEGACY_FORMAT_VERSION = "OriginalRoot-data-bundle-v1"
+DATABASE_MEMBER = "originalroot.sqlite3"
+LEGACY_DATABASE_MEMBER = "OriginalRoot.sqlite3"
+DATABASE_MEMBERS = {DATABASE_MEMBER, LEGACY_DATABASE_MEMBER}
 MEDIA_EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 
 
@@ -107,12 +111,12 @@ def create_backup(output_dir: Path = BACKUP_DIR) -> Path:
     if output_dir.resolve() == EVIDENCE_PATH.resolve():
         raise BackupError("Backup output cannot be the evidence directory")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    archive_path = output_dir / f"OriginalRoot-backup-{stamp}-{uuid.uuid4().hex[:8]}.tar.gz"
+    archive_path = output_dir / f"originalroot-backup-{stamp}-{uuid.uuid4().hex[:8]}.tar.gz"
     temp_archive = output_dir / f".{archive_path.name}.tmp"
 
     try:
-        with tempfile.TemporaryDirectory(prefix="OriginalRoot-backup-") as temp_dir_name:
-            temp_database = Path(temp_dir_name) / "OriginalRoot.sqlite3"
+        with tempfile.TemporaryDirectory(prefix="originalroot-backup-") as temp_dir_name:
+            temp_database = Path(temp_dir_name) / DATABASE_MEMBER
             source = sqlite3.connect(DATA_PATH, timeout=30)
             target = sqlite3.connect(temp_database)
             try:
@@ -131,7 +135,7 @@ def create_backup(output_dir: Path = BACKUP_DIR) -> Path:
             observed_evidence = {item.name: hash_file(item) for item in source_files}
             if observed_evidence != expected_evidence:
                 raise BackupError("Evidence files and database records do not match; retry when no upload or review is in progress")
-            entries = [("OriginalRoot.sqlite3", temp_database)]
+            entries = [(DATABASE_MEMBER, temp_database)]
             entries.extend((f"evidence/{item.name}", item) for item in source_files)
             manifest_files = []
             for archive_name, source_path in entries:
@@ -171,7 +175,7 @@ def _read_and_verify_to_database(archive_path: Path, database_output: Path) -> t
         for member in members:
             if not member.isfile() or member.name in by_name:
                 raise BackupError("Backup contains a duplicate or unsupported archive entry")
-            if member.name != "manifest.json" and member.name != "OriginalRoot.sqlite3" and not re.fullmatch(r"evidence/EVD-[0-9A-F]{16}\.(?:jpg|png|webp)", member.name):
+            if member.name != "manifest.json" and member.name not in DATABASE_MEMBERS and not re.fullmatch(r"evidence/EVD-[0-9A-F]{16}\.(?:jpg|png|webp)", member.name):
                 raise BackupError("Backup contains an unexpected file path")
             by_name[member.name] = member
         manifest_member = by_name.get("manifest.json")
@@ -184,7 +188,14 @@ def _read_and_verify_to_database(archive_path: Path, database_output: Path) -> t
             manifest = json.loads(manifest_stream.read().decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise BackupError("Backup manifest is invalid") from exc
-        if not isinstance(manifest, dict) or manifest.get("format") != FORMAT_VERSION or not isinstance(manifest.get("files"), list):
+        if not isinstance(manifest, dict) or not isinstance(manifest.get("files"), list):
+            raise BackupError("Backup format is not supported")
+        format_version = manifest.get("format")
+        if format_version == FORMAT_VERSION:
+            database_member_name = DATABASE_MEMBER
+        elif format_version == LEGACY_FORMAT_VERSION:
+            database_member_name = LEGACY_DATABASE_MEMBER
+        else:
             raise BackupError("Backup format is not supported")
         expected = {"manifest.json"}
         database_seen = False
@@ -192,7 +203,7 @@ def _read_and_verify_to_database(archive_path: Path, database_output: Path) -> t
             if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
                 raise BackupError("Backup manifest has an invalid file entry")
             name = entry["path"]
-            if name == "OriginalRoot.sqlite3":
+            if name == database_member_name:
                 if database_seen:
                     raise BackupError("Backup manifest repeats the database")
                 database_seen = True
@@ -213,7 +224,7 @@ def _read_and_verify_to_database(archive_path: Path, database_output: Path) -> t
             if size != entry["size"] or digest != entry["sha256"]:
                 raise BackupError(f"Backup checksum mismatch: {name}")
             expected.add(name)
-            if name == "OriginalRoot.sqlite3":
+            if name == database_member_name:
                 database_output.parent.mkdir(parents=True, exist_ok=True)
                 stream = archive.extractfile(member)
                 if stream is None:
@@ -240,13 +251,13 @@ def _read_and_verify_to_database(archive_path: Path, database_output: Path) -> t
 def read_and_verify(archive_path: Path, database_output: Path | None = None) -> tuple[dict, int]:
     if database_output is not None:
         return _read_and_verify_to_database(archive_path, database_output)
-    with tempfile.TemporaryDirectory(prefix="OriginalRoot-verify-") as temp_dir_name:
-        return _read_and_verify_to_database(archive_path, Path(temp_dir_name) / "OriginalRoot.sqlite3")
+    with tempfile.TemporaryDirectory(prefix="originalroot-verify-") as temp_dir_name:
+        return _read_and_verify_to_database(archive_path, Path(temp_dir_name) / DATABASE_MEMBER)
 
 
 def stage_archive(archive_path: Path, stage: Path) -> int:
     stage.mkdir(parents=True, exist_ok=True)
-    manifest, evidence_count = read_and_verify(archive_path, stage / "OriginalRoot.sqlite3")
+    manifest, evidence_count = read_and_verify(archive_path, stage / DATABASE_MEMBER)
     staged_evidence = stage / "evidence"
     staged_evidence.mkdir()
     with tarfile.open(archive_path, mode="r:gz") as archive:
@@ -274,16 +285,16 @@ def restore_backup(archive_path: Path, confirmed: bool) -> tuple[Path, int]:
     if archive_path.resolve() == DATA_PATH.resolve():
         raise BackupError("The backup archive cannot replace the database file")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="OriginalRoot-restore-", dir=DATA_DIR) as stage_name:
+    with tempfile.TemporaryDirectory(prefix="originalroot-restore-", dir=DATA_DIR) as stage_name:
         stage = Path(stage_name)
         new_stage = stage / "new"
         evidence_count = stage_archive(archive_path, new_stage)
         safety_copy = create_backup()
         rollback_stage = stage / "current"
         stage_archive(safety_copy, rollback_stage)
-        staged_database = new_stage / "OriginalRoot.sqlite3"
+        staged_database = new_stage / DATABASE_MEMBER
         staged_evidence = new_stage / "evidence"
-        rollback_database = rollback_stage / "OriginalRoot.sqlite3"
+        rollback_database = rollback_stage / DATABASE_MEMBER
         rollback_evidence = rollback_stage / "evidence"
         old_evidence = stage / "old-evidence"
         installed_database = installed_evidence = False

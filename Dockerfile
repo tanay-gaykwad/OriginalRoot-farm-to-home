@@ -10,16 +10,16 @@ RUN pnpm build
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    OriginalRoot_HOST=0.0.0.0 \
-    OriginalRoot_PORT=8080 \
-    OriginalRoot_DB_PATH=/data/OriginalRoot.sqlite3
+    ORIGINALROOT_HOST=0.0.0.0 \
+    ORIGINALROOT_PORT=8080 \
+    ORIGINALROOT_DB_PATH=/data/originalroot.sqlite3
 WORKDIR /app
 COPY api ./api
 COPY src/catalog.json ./src/catalog.json
 COPY --from=web-build /app/dist ./dist
-RUN useradd --system --uid 10001 --create-home OriginalRoot \
+RUN useradd --system --uid 10001 --create-home originalroot \
     && mkdir -p /data \
-    && chown -R OriginalRoot:OriginalRoot /app /data
-USER OriginalRoot
+    && chown -R originalroot:originalroot /app /data
+USER originalroot
 EXPOSE 8080
 CMD ["python", "api/server.py"]

@@ -21,7 +21,7 @@ The startup schema adds `grower_note` to existing SQLite databases with an empty
 
 The local Compose app still uses SQLite in the existing named `OriginalRoot-data` volume and is published only on loopback. Filesystem permissions reduce accidental access by other local users. SQLite is not encrypted at rest, and this is not a managed, multi-region, or internet-facing production database. Local backups remain manual and unencrypted; protect them separately.
 
-For the local Docker app, `OriginalRoot_COOKIE_SECURE=0` is appropriate because it uses loopback HTTP. When served behind HTTPS, set `OriginalRoot_COOKIE_SECURE=1` so session cookies use the `Secure` attribute. The server does not enable cross-origin API access. Keep the one-time operator bootstrap secret and external API keys in an untracked `.env` file or a deployment secret manager.
+For the local Docker app, `ORIGINALROOT_COOKIE_SECURE=0` is appropriate because it uses loopback HTTP. When served behind HTTPS, set `ORIGINALROOT_COOKIE_SECURE=1` so session cookies use the `Secure` attribute. The server does not enable cross-origin API access. Keep the one-time operator bootstrap secret and external API keys in an untracked `.env` file or a deployment secret manager.
 
 ## Reference and adaptation
 

@@ -25,18 +25,26 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 
-ROOT = Path(os.environ.get("OriginalRoot_ROOT") or getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+def setting(name: str, legacy_name: str, default: str) -> str:
+    """Read current configuration first and accept older installations during rebranding."""
+    value = os.environ.get(name)
+    if value is None:
+        value = os.environ.get(legacy_name)
+    return default if value is None else value
+
+
+ROOT = Path(setting("ORIGINALROOT_ROOT", "OriginalRoot_ROOT", str(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))))
 CATALOG_PATH = ROOT / "src" / "catalog.json"
 STATIC_PATH = ROOT / "dist"
-DATA_PATH = Path(os.environ.get("OriginalRoot_DB_PATH", ROOT / ".data" / "OriginalRoot.sqlite3"))
+DATA_PATH = Path(setting("ORIGINALROOT_DB_PATH", "OriginalRoot_DB_PATH", str(ROOT / ".data" / "originalroot.sqlite3")))
 EVIDENCE_PATH = DATA_PATH.parent / "evidence"
 ROUTE_FEE = 24
 MAX_BODY_BYTES = 16_384
 MAX_EVIDENCE_BYTES = 2_000_000
 MAX_EVIDENCE_REQUEST_BYTES = 2_750_000
 EVIDENCE_MEDIA_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
-OPERATOR_TOKEN = os.environ.get("OriginalRoot_OPERATOR_TOKEN", "")
-DATA_GOV_IN_API_KEY = os.environ.get("OriginalRoot_DATA_GOV_IN_API_KEY", "").strip()
+OPERATOR_TOKEN = setting("ORIGINALROOT_OPERATOR_TOKEN", "OriginalRoot_OPERATOR_TOKEN", "")
+DATA_GOV_IN_API_KEY = setting("ORIGINALROOT_DATA_GOV_IN_API_KEY", "OriginalRoot_DATA_GOV_IN_API_KEY", "").strip()
 MANDI_RESOURCE_ID = "9ef84268-d588-465a-a308-a864a43d0070"
 COMMUNITIES = {"Mysuru", "Mandya", "Srirangapatna"}
 PRODUCT_CATEGORIES = {"fresh", "staples"}
@@ -60,6 +68,34 @@ def load_catalog() -> list[dict]:
 
 CATALOG = load_catalog()
 PRODUCTS = {item["id"]: item for item in CATALOG}
+
+
+def migrate_legacy_database() -> None:
+    """Copy an older database once, using SQLite's online backup API for WAL safety."""
+    legacy_path = DATA_PATH.with_name("OriginalRoot.sqlite3")
+    if DATA_PATH.exists() or not legacy_path.is_file():
+        return
+
+    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    source = None
+    destination = None
+    try:
+        source = sqlite3.connect(f"{legacy_path.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
+        destination = sqlite3.connect(DATA_PATH, timeout=5)
+        source.backup(destination)
+        destination.close()
+        destination = None
+        DATA_PATH.chmod(0o600)
+    except Exception:
+        if destination is not None:
+            destination.close()
+        DATA_PATH.unlink(missing_ok=True)
+        Path(f"{DATA_PATH}-wal").unlink(missing_ok=True)
+        Path(f"{DATA_PATH}-shm").unlink(missing_ok=True)
+        raise
+    finally:
+        if source is not None:
+            source.close()
 
 
 def connect_db() -> sqlite3.Connection:
@@ -348,7 +384,7 @@ def json_bytes(value: object) -> bytes:
 
 
 class OriginalRootHandler(BaseHTTPRequestHandler):
-    server_version = "OriginalRootLocal/0.3"
+    server_version = "OriginalRootLocal/0.5"
 
     def _headers(self, status: int, content_type: str = "application/json; charset=utf-8") -> None:
         self.send_response(status)
@@ -486,7 +522,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _session_cookie(token: str, *, clear: bool = False, cookie_name: str = "OriginalRoot_session") -> str:
-        secure = "; Secure" if os.environ.get("OriginalRoot_COOKIE_SECURE") == "1" else ""
+        secure = "; Secure" if setting("ORIGINALROOT_COOKIE_SECURE", "OriginalRoot_COOKIE_SECURE", "0") == "1" else ""
         if clear:
             return f"{cookie_name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict{secure}"
         return f"{cookie_name}={token}; Path=/; Max-Age=604800; HttpOnly; SameSite=Strict{secure}"
@@ -553,7 +589,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         """Fetch official daily wholesale mandi prices without exposing the API key."""
         if not DATA_GOV_IN_API_KEY:
             self._send_json(503, {
-                "detail": "Official mandi prices are not configured. Add OriginalRoot_DATA_GOV_IN_API_KEY to the server environment.",
+                "detail": "Official mandi prices are not configured. Add ORIGINALROOT_DATA_GOV_IN_API_KEY to the server environment.",
                 "configured": False,
                 "source": "data.gov.in / AGMARKNET",
             })
@@ -575,7 +611,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             params["filters[commodity]"] = commodity
         request = urllib.request.Request(
             f"https://api.data.gov.in/resource/{MANDI_RESOURCE_ID}?{urllib.parse.urlencode(params)}",
-            headers={"Accept": "application/json", "User-Agent": "OriginalRoot/0.3"},
+            headers={"Accept": "application/json", "User-Agent": "OriginalRoot/0.5"},
         )
         try:
             with urllib.request.urlopen(request, timeout=10) as response:
@@ -668,7 +704,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             export_orders = [{**dict(row), "events": order_events.get(row["reference"], [])} for row in order_rows]
             export_tickets = [{**dict(row), "events": support_history.get(row["id"], [])} for row in tickets]
             now = datetime.now(timezone.utc).strftime("%Y%m%d")
-            self._send_json(200, {"exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "customer": {key: customer[key] for key in ("username", "full_name", "phone", "created_at")}, "orders": export_orders, "support_tickets": export_tickets}, {"Content-Disposition": f'attachment; filename="OriginalRoot-account-data-{now}.json"'})
+            self._send_json(200, {"exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "customer": {key: customer[key] for key in ("username", "full_name", "phone", "created_at")}, "orders": export_orders, "support_tickets": export_tickets}, {"Content-Disposition": f'attachment; filename="originalroot-account-data-{now}.json"'})
             return
         if path == "/api/customer/orders":
             customer = self._customer_session()
@@ -2093,8 +2129,9 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     os.umask(0o077)
-    host = os.environ.get("OriginalRoot_HOST", "127.0.0.1")
-    port = int(os.environ.get("OriginalRoot_PORT", "8080"))
+    host = setting("ORIGINALROOT_HOST", "OriginalRoot_HOST", "127.0.0.1")
+    port = int(setting("ORIGINALROOT_PORT", "OriginalRoot_PORT", "8080"))
+    migrate_legacy_database()
     with closing(connect_db()):
         pass
     print(f"OriginalRoot local API listening on http://{host}:{port} (online payments disabled)")

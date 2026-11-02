@@ -10,7 +10,7 @@
 
 ## Account and data boundaries
 
-Mobile numbers are collected as account/order contact details but are **not verified** by SMS or OTP. Account recovery, phone changes, account deletion, payments, refunds, and multi-device production security operations are not included. Customer data remains in the local SQLite database and should be protected with the host's disk access controls and backups. Set `OriginalRoot_COOKIE_SECURE=1` when serving over HTTPS; keep the service private until production hosting, rate limiting, monitoring, and recovery procedures are configured.
+Mobile numbers are collected as account/order contact details but are **not verified** by SMS or OTP. Account recovery, phone changes, account deletion, payments, refunds, and multi-device production security operations are not included. Customer data remains in the local SQLite database and should be protected with the host's disk access controls and backups. Set `ORIGINALROOT_COOKIE_SECURE=1` when serving over HTTPS; keep the service private until production hosting, rate limiting, monitoring, and recovery procedures are configured.
 
 The API never stores customer passwords in plaintext. The application does not provide an account recovery path, so users must retain their credentials until recovery is implemented.
 

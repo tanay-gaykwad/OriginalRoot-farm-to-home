@@ -17,31 +17,31 @@ Make local pilot data recoverable and let the workspace owner remove or restore 
 Run from the repository root in PowerShell:
 
 ```powershell
-docker compose exec -T OriginalRoot python api/backup.py create
-docker compose exec -T OriginalRoot python api/backup.py verify /data/backups/NAME-RETURNED-BY-CREATE.tar.gz
-New-Item -ItemType Directory -Force .\OriginalRoot-backups
-docker compose cp OriginalRoot:/data/backups/NAME-RETURNED-BY-CREATE.tar.gz .\OriginalRoot-backups\
+docker compose exec -T originalroot python api/backup.py create
+docker compose exec -T originalroot python api/backup.py verify /data/backups/NAME-RETURNED-BY-CREATE.tar.gz
+New-Item -ItemType Directory -Force .\originalroot-backups
+docker compose cp originalroot:/data/backups/NAME-RETURNED-BY-CREATE.tar.gz .\originalroot-backups\
 ```
 
 Run backup after the current upload and review activity has settled. If a grower is uploading or an operator is changing evidence while the bundle is being captured, the tool detects a database/file mismatch and asks you to retry.
 
-The archive contains customer contact and delivery data, grower account data, and uploaded evidence. Store any copy outside the Docker volume in an encrypted, access-controlled location. A backup kept only inside the `OriginalRoot-data` volume will not survive loss of that volume or its host.
+The archive contains customer contact and delivery data, grower account data, and uploaded evidence. Store any copy outside the Docker volume in an encrypted, access-controlled location. A backup kept only inside the Docker data volume will not survive loss of that volume or its host.
 
 ## Restore a backup
 
 First copy the intended archive into the running container, verify it, and stop the service:
 
 ```powershell
-docker compose cp .\OriginalRoot-backups\YOUR-BACKUP.tar.gz OriginalRoot:/data/restore.tar.gz
-docker compose exec -T OriginalRoot python api/backup.py verify /data/restore.tar.gz
-docker compose stop OriginalRoot
+docker compose cp .\originalroot-backups\YOUR-BACKUP.tar.gz originalroot:/data/restore.tar.gz
+docker compose exec -T originalroot python api/backup.py verify /data/restore.tar.gz
+docker compose stop originalroot
 ```
 
 Then run the destructive restore command and restart the service:
 
 ```powershell
-docker compose run --rm --no-deps --entrypoint python OriginalRoot api/backup.py restore /data/restore.tar.gz --confirm
-docker compose up -d OriginalRoot
+docker compose run --rm --no-deps --entrypoint python originalroot api/backup.py restore /data/restore.tar.gz --confirm
+docker compose up -d originalroot
 docker compose ps
 ```
 
