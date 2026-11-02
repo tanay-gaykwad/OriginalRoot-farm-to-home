@@ -15,4 +15,4 @@ The IP-based limit can affect multiple users sharing one public address. It is a
 
 ## Next phase
 
-Add customer profile updates and consent/data controls, account recovery through a verified channel, and a deployment configuration with a managed database and secret store before expanding access beyond a locally controlled rollout.
+Phase 16 adds safe cancellation of unaccepted customer requests. Profile and consent controls, verified account recovery, and a managed database and secret store still need to be addressed before access expands beyond a locally controlled rollout.

@@ -1104,12 +1104,46 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 customer = self._customer_session()
                 with closing(connect_db()) as connection:
                     order = connection.execute("SELECT * FROM harvest_orders WHERE reference = ?", (reference,)).fetchone()
-                    if order is None or not ((customer is not None and order["customer_id"] == customer["id"]) or (isinstance(phone, str) and hmac.compare_digest(order["customer_phone"].encode("utf-8"), phone.encode("utf-8")))):
+                    account_owner = order is not None and customer is not None and order["customer_id"] == customer["id"]
+                    guest_match = order is not None and order["customer_id"] is None and isinstance(phone, str) and re.fullmatch(r"[6-9][0-9]{9}", phone) and hmac.compare_digest(order["customer_phone"].encode("utf-8"), phone.encode("utf-8"))
+                    if not (account_owner or guest_match):
                         self._send_json(404, {"detail": "We could not match that order and mobile number"})
                         return
                     events = connection.execute("SELECT to_status, note, created_at FROM harvest_order_events WHERE order_reference = ? ORDER BY id", (reference,)).fetchall()
                     latest = connection.execute("SELECT note FROM harvest_order_events WHERE order_reference = ? ORDER BY id DESC LIMIT 1", (reference,)).fetchone()
                 self._send_json(200, {"reference": order["reference"], "crop": order["crop"], "category": order["category"], "quantity": order["quantity"], "unit": order["unit"], "total": order["total"], "status": order["status"], "fulfillment_method": order["fulfillment_method"], "latest_note": latest["note"] if latest else "", "events": [dict(event) for event in events], "created_at": order["created_at"], "updated_at": order["updated_at"]})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+        if request_path == "/api/orders/cancel":
+            try:
+                payload = self._read_json()
+                reference = payload.get("reference")
+                phone = payload.get("phone")
+                if not isinstance(reference, str) or not re.fullmatch(r"VAV-[0-9A-F]{16}", reference.upper()):
+                    raise ValueError("Enter a valid order reference")
+                reference = reference.upper()
+                customer = self._customer_session()
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                with closing(connect_db()) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    order = connection.execute("SELECT customer_id, customer_phone, status FROM harvest_orders WHERE reference = ?", (reference,)).fetchone()
+                    account_owner = order is not None and customer is not None and order["customer_id"] == customer["id"]
+                    guest_match = order is not None and order["customer_id"] is None and isinstance(phone, str) and re.fullmatch(r"[6-9][0-9]{9}", phone) and hmac.compare_digest(order["customer_phone"].encode("utf-8"), phone.encode("utf-8"))
+                    if not (account_owner or guest_match):
+                        connection.rollback()
+                        self._send_json(404, {"detail": "Order not found"})
+                        return
+                    if order["status"] != "requested":
+                        connection.rollback()
+                        self._send_json(409, {"detail": "This request can no longer be cancelled here. Contact the local operator for help."})
+                        return
+                    note = "Customer cancelled before operator acceptance"
+                    connection.execute("UPDATE harvest_orders SET status = 'cancelled', updated_at = ? WHERE reference = ? AND status = 'requested'", (now, reference))
+                    connection.execute("INSERT INTO harvest_order_events (order_reference, from_status, to_status, note, created_at) VALUES (?, 'requested', 'cancelled', ?, ?)", (reference, note, now))
+                    connection.commit()
+                self._send_json(200, {"reference": reference, "status": "cancelled", "updated_at": now, "message": "Order request cancelled. The reserved quantity is available again."})
                 return
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
