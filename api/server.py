@@ -162,6 +162,14 @@ def connect_db() -> sqlite3.Connection:
         )"""
     )
     connection.execute(
+        """CREATE TABLE IF NOT EXISTS customer_login_limits (
+            bucket_hash TEXT PRIMARY KEY,
+            failed_attempts INTEGER NOT NULL,
+            window_started_at TEXT NOT NULL,
+            locked_until TEXT
+        )"""
+    )
+    connection.execute(
         """CREATE TABLE IF NOT EXISTS operator_users (
             id TEXT PRIMARY KEY,
             username TEXT NOT NULL UNIQUE,
@@ -1009,21 +1017,68 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 password = payload.get("password")
                 if not isinstance(username, str) or not isinstance(password, str) or len(username) > 32 or len(password) > 128:
                     raise ValueError("Enter a valid username and password")
+                now = datetime.now(timezone.utc)
+                now_text = now.isoformat(timespec="seconds")
+                bucket_hash = hashlib.sha256(f"customer-login:{self.client_address[0]}".encode("utf-8")).hexdigest()
+                with closing(connect_db()) as connection:
+                    limit = connection.execute("SELECT failed_attempts, window_started_at, locked_until FROM customer_login_limits WHERE bucket_hash = ?", (bucket_hash,)).fetchone()
+                if limit is not None and limit["locked_until"] and limit["locked_until"] > now_text:
+                    self._send_json(429, {"detail": "Too many sign-in attempts. Wait 15 minutes before trying again."})
+                    return
                 with closing(connect_db()) as connection:
                     account = connection.execute("SELECT id, username, full_name, phone, password_hash, password_salt FROM customers WHERE username = ?", (username.lower(),)).fetchone()
                 supplied_hash = self._password_hash(password, account["password_salt"] if account else "00" * 16)
                 if account is None or not hmac.compare_digest(supplied_hash, account["password_hash"]):
+                    window_start = datetime.fromisoformat(limit["window_started_at"]) if limit else now
+                    failures = (limit["failed_attempts"] if limit and window_start > now - timedelta(minutes=15) else 0) + 1
+                    locked_until = (now + timedelta(minutes=15)).isoformat(timespec="seconds") if failures >= 10 else None
+                    with closing(connect_db()) as connection, connection:
+                        connection.execute("DELETE FROM customer_login_limits WHERE window_started_at <= ?", ((now - timedelta(days=1)).isoformat(timespec="seconds"),))
+                        connection.execute("INSERT INTO customer_login_limits (bucket_hash, failed_attempts, window_started_at, locked_until) VALUES (?, ?, ?, ?) ON CONFLICT(bucket_hash) DO UPDATE SET failed_attempts = excluded.failed_attempts, window_started_at = excluded.window_started_at, locked_until = excluded.locked_until", (bucket_hash, failures, window_start.isoformat(timespec="seconds") if failures > 1 else now_text, locked_until))
                     self._send_json(401, {"detail": "Username or password is incorrect"})
                     return
-                now = datetime.now(timezone.utc)
                 token, token_hash = self._session_token()
                 with closing(connect_db()) as connection, connection:
+                    connection.execute("DELETE FROM customer_login_limits WHERE bucket_hash = ?", (bucket_hash,))
                     connection.execute("DELETE FROM customer_sessions WHERE expires_at <= ?", (now.isoformat(timespec="seconds"),))
                     connection.execute("INSERT INTO customer_sessions (token_hash, customer_id, expires_at, created_at) VALUES (?, ?, ?, ?)", (token_hash, account["id"], (now + timedelta(days=7)).isoformat(timespec="seconds"), now.isoformat(timespec="seconds")))
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
                 return
             self._send_json(200, {"customer": {key: account[key] for key in ("id", "username", "full_name", "phone")}}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_customer_session")})
+            return
+        if request_path == "/api/customer/password":
+            customer = self._customer_session()
+            if customer is None:
+                self._send_json(401, {"detail": "Sign in before changing your password"})
+                return
+            try:
+                payload = self._read_json()
+                current_password = payload.get("current_password")
+                new_password = payload.get("new_password")
+                if not isinstance(current_password, str) or len(current_password) > 128:
+                    raise ValueError("Enter your current password")
+                if not isinstance(new_password, str) or not 12 <= len(new_password) <= 128:
+                    raise ValueError("New password must be 12 to 128 characters")
+                with closing(connect_db()) as connection:
+                    account = connection.execute("SELECT password_hash, password_salt FROM customers WHERE id = ?", (customer["id"],)).fetchone()
+                supplied_hash = self._password_hash(current_password, account["password_salt"])
+                if not hmac.compare_digest(supplied_hash, account["password_hash"]):
+                    self._send_json(401, {"detail": "Current password is incorrect"})
+                    return
+                salt = secrets.token_hex(16)
+                password_hash = self._password_hash(new_password, salt)
+                now = datetime.now(timezone.utc)
+                token, token_hash = self._session_token()
+                now_text = now.isoformat(timespec="seconds")
+                with closing(connect_db()) as connection, connection:
+                    connection.execute("UPDATE customers SET password_hash = ?, password_salt = ? WHERE id = ?", (password_hash, salt, customer["id"]))
+                    connection.execute("DELETE FROM customer_sessions WHERE customer_id = ?", (customer["id"],))
+                    connection.execute("INSERT INTO customer_sessions (token_hash, customer_id, expires_at, created_at) VALUES (?, ?, ?, ?)", (token_hash, customer["id"], (now + timedelta(days=7)).isoformat(timespec="seconds"), now_text))
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            self._send_json(200, {"status": "password_changed", "message": "Password changed. Other sign-in sessions were closed."}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_customer_session")})
             return
         if request_path == "/api/customer/logout":
             cookie = SimpleCookie()

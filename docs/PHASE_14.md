@@ -16,4 +16,4 @@ The API never stores customer passwords in plaintext. The application does not p
 
 ## Next phase
 
-Add customer self-service order cancellation rules, profile and consent controls, credential recovery, and operational safeguards for a hosted service. Then validate the full customer-to-grower workflow in a single supply corridor before public ordering.
+Phase 15 adds basic sign-in throttling, password change, and revocation of other active sessions. Profile and consent controls, verified credential recovery, and hosted-service safeguards remain future work. Then validate the full customer-to-grower workflow in a single supply corridor before public ordering.
