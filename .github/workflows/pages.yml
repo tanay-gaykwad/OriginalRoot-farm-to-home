@@ -1,4 +1,4 @@
-name: Publish OriginalRoot preview
+name: Publish OriginalRoot website
 
 on:
   push:

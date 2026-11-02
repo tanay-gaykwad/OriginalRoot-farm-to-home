@@ -6,7 +6,6 @@ import {
   ChevronDown,
   CircleCheck,
   ClipboardCheck,
-  Leaf,
   MapPin,
   MapPinned,
   Menu,
@@ -50,7 +49,7 @@ const products = productCatalog as Product[];
 type ModalState = { type: "trace"; product: Product } | { type: "demand" } | { type: "order"; listing: PublishedOffer } | { type: "passport"; listing: PublishedOffer } | { type: "track" } | null;
 
 function Logo({ compact = false }: { compact?: boolean }) {
-  return <a className={`brand ${compact ? "brand-compact" : ""}`} href="#top" aria-label="OriginalRoot home"><span className="brand-symbol"><Leaf size={19} strokeWidth={2.4} /></span><span className="brand-name">OriginalRoot<span>.</span></span></a>;
+  return <a className={`ks-brand platform-brand ${compact ? "brand-compact" : ""}`} href="#top" aria-label="OriginalRoot home"><span className="ks-mark"><svg viewBox="0 0 38 38" aria-hidden="true"><path d="M8 28c8-1 16-7 21-18M10 18c5 1 9 5 10 10M19 12c3 1 6 4 7 8" /><circle cx="29" cy="9" r="2" /></svg></span><span>OriginalRoot<span className="ks-dot">.</span></span></a>;
 }
 
 type Workspace = "shop" | "grower" | "operator" | "customer";
@@ -162,13 +161,13 @@ function MarketplaceApp() {
         <main>
           <section className="hero wrap">
             <div className="hero-copy"><div className="eyebrow"><span className="eyebrow-line" /> A closer kind of food system</div><h1>Good food has<br />a <em>real</em> starting point.</h1><p>Meet the growers behind your everyday food. See when it was picked, how it was graded, and where your money goes.</p><div className="hero-actions"><button className="button button-dark" onClick={() => document.getElementById("the-harvest")?.scrollIntoView({ behavior: "smooth" })}>Shop this week’s harvest <ArrowRight size={16} /></button><button className="text-button" onClick={() => setMode("grower")}>I grow food <ArrowRight size={15} /></button></div><div className="hero-proof"><div className="mini-avatars"><i>LR</i><i>SK</i><i>AM</i><i>+</i></div><span><b>Grown close. Accounted for.</b><small>Designed for farmers and local collectives</small></span></div></div>
-            <div className="hero-visual"><div className="hero-image"><div className="sun-disc" /><div className="hill hill-back" /><div className="hill hill-front" /><div className="field-row row-one" /><div className="field-row row-two" /><div className="field-row row-three" /><div className="field-row row-four" /><span className="hero-produce tomato-one">🍅</span><span className="hero-produce leaf-one">🌿</span><span className="hero-produce tomato-two">🍅</span><span className="hero-produce leaf-two">🌱</span><span className="hero-label label-top"><span className="fresh-dot" /> Picked at 6:10 am</span><span className="hero-label label-bottom"><span className="label-icon"><QrCode size={15} /></span><span><b>Every batch has a story</b><small>Scan the OriginalRoot Passport</small></span></span><div className="hero-stamp">GROWN<br />WITH CARE</div></div><span className="visual-caption">A morning in Mandya, Karnataka <span>·</span> This week’s harvest</span></div>
+            <div className="hero-visual ks-platform-visual"><div className="ks-platform-image"><img src="/field-to-home.svg" alt="Illustration of a grower and a local home connected by a harvest route" /><span className="hero-label label-bottom"><span className="label-icon"><QrCode size={15} /></span><span><b>A clearer journey for every harvest</b><small>Offer · review · handoff</small></span></span></div><span className="visual-caption">A local network built around growers and households</span></div>
           </section>
 
           <section className="trust-strip"><div className="wrap trust-inner"><div><ShieldCheck size={19} /><span><b>Known origin</b><small>Farmer and batch details</small></span></div><div><ClipboardCheck size={19} /><span><b>Clear quality</b><small>Grades with a real standard</small></span></div><div><WalletCards size={19} /><span><b>Open pricing</b><small>See the price split</small></span></div><div><Truck size={19} /><span><b>Careful delivery</b><small>Grouped local routes</small></span></div></div></section>
 
           <section className="harvest-section wrap" id="the-harvest">
-            <div className="section-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> Local marketplace</div><h2>Grower-approved <em>harvests</em></h2><p>Only current offers from the connected local OriginalRoot service can be requested.</p></div></div>
+            <div className="section-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> Local marketplace</div><h2>Grower-approved <em>harvests</em></h2><p>Browse current offers, compare the price split, and request only what a local grower has available.</p></div></div>
             {marketStatus === "loading" ? <div className="approved-empty"><span>⏳</span><div><b>Connecting to the local marketplace…</b><small>Checking for current, reviewed grower offers.</small></div></div> : marketStatus === "offline" ? <div className="approved-empty"><span>🔌</span><div><b>The marketplace service is not connected.</b><small>GitHub Pages is an information site without shared data. Start the local Docker app to use the shared marketplace and order-request service.</small><button className="text-button" onClick={() => void loadPublishedOffers()}>Try again <ArrowRight size={14} /></button></div></div> : <PublishedHarvests listings={publishedOffers} canOrder={orderRequestsAvailable} onOrder={(listing) => setModal({ type: "order", listing })} onPassport={(listing) => setModal({ type: "passport", listing })} />}
             <div className="demand-banner"><div><span className="demand-banner-icon"><Sprout size={18} /></span><span><b>Help growers plan the next harvest</b><small>Share what your household would buy. No name, phone, payment, or commitment needed.</small></span></div><button className="button button-dark" onClick={() => { setDemandSaved(false); setDemandLocation(""); setModal({ type: "demand" }); }}>Add a demand signal <ArrowRight size={15} /></button></div>
           </section>

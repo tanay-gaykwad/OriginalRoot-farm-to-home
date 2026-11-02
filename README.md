@@ -1,6 +1,6 @@
 # OriginalRoot
 
-OriginalRoot is a locally hosted farmer-to-home marketplace workflow for growers, customers, and the people coordinating orders. It connects grower harvest offers to customer orders, records batch checkpoints and price splits, and includes local delivery, account workspaces, and support handling. It is designed to help a small team trial one supply corridor before taking on a public launch.
+OriginalRoot is a farmer-to-home marketplace and operations platform for growers, customers, and local teams. It connects grower harvest offers to customer orders, records batch checkpoints and price splits, and includes local delivery, account workspaces, and support handling. The name joins *khet* (field) with *sangam* (meeting point): the product is a place where growers and nearby households meet around a clear, shared harvest record.
 
 [![Build](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/build.yml)
 [![Pages preview](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/pages.yml/badge.svg?branch=main)](https://github.com/tanay-gaykwad/originalroot-farm-to-home/actions/workflows/pages.yml)
@@ -15,6 +15,8 @@ For a Windows desktop installer, download the latest `OriginalRoot-Setup` `.exe`
 
 Read the [Windows installer guide](docs/DESKTOP_INSTALLER.md) for setup, first owner access, and local data backup steps.
 
+See the [brand identity](docs/BRAND_IDENTITY.md) for the naming and visual direction.
+
 ## Who it is for
 
 - **Growers:** submit harvest offers with a stated minimum payout and track offer review.
@@ -23,7 +25,7 @@ Read the [Windows installer guide](docs/DESKTOP_INSTALLER.md) for setup, first o
 
 ## Current scope
 
-The public homepage is the OriginalRoot brand introduction. The platform app is available through its **Explore OriginalRoot** action and at `/?platform=1`; its marketplace, grower, customer, and operations workspaces have distinct shareable URLs. GitHub Pages has no shared API or database and reports that boundary in the marketplace. Docker and the Windows desktop app use a local API and SQLite database for grower and customer accounts, private customer order history, operator review, real order requests, delivery handoffs, batch records, and support tickets. Fresh produce and grains/pulses share one offer flow with category-aware units and customer filters. Customers may order as guests or sign in; guest tracking requires their order reference and checkout mobile number. Customers can cancel before an operator accepts the request. Customer accounts include password hashing, basic sign-in throttling, and password change with session revocation. Mobile numbers are not OTP-verified, and the platform has no online payment, SMS, or driver network. Keep the local service bound to loopback. See the [Phase 11 launch roadmap](docs/PHASE_11.md), [Phase 12 marketplace boundary](docs/PHASE_12.md), [Phase 13 crop categories and units](docs/PHASE_13.md), [Phase 14 customer accounts](docs/PHASE_14.md), [Phase 15 account security](docs/PHASE_15.md), and [Phase 16 customer order control](docs/PHASE_16.md).
+The public homepage is the OriginalRoot brand introduction. The platform app is available through its **Explore OriginalRoot** action and at `/?platform=1`; its marketplace, grower, customer, and operations workspaces have distinct shareable URLs. GitHub Pages has no shared API or database and reports that boundary in the marketplace. Docker and the Windows desktop app use a local API and SQLite database for grower and customer accounts, private customer order history, operator review, real order requests, delivery handoffs, batch records, and support tickets. Fresh produce and grains/pulses share one offer flow with category-aware units and customer filters. Customers may order as guests or sign in; guest tracking requires their order reference and checkout mobile number. Customers can cancel before an operator accepts the request, edit their profile, and download their account-linked order and support data. Customer accounts include password hashing, basic sign-in throttling, and password change with session revocation. Mobile numbers are not OTP-verified, and the platform has no online payment, SMS, or driver network. Keep the local service bound to loopback. See the [Phase 11 launch roadmap](docs/PHASE_11.md), [Phase 12 marketplace boundary](docs/PHASE_12.md), [Phase 13 crop categories and units](docs/PHASE_13.md), [Phase 14 customer accounts](docs/PHASE_14.md), [Phase 15 account security](docs/PHASE_15.md), [Phase 16 customer order control](docs/PHASE_16.md), and [Phase 17 customer data access](docs/PHASE_17.md).
 
 ## What you can explore
 
@@ -73,6 +75,8 @@ Phase 14 adds customer sign-in, account-linked order requests, private order his
 Phase 15 adds basic sign-in throttling, password change, and revocation of other customer sessions when credentials change. It is a local safeguard, not a production identity provider. See the [Phase 15 account security](docs/PHASE_15.md).
 
 Phase 16 lets customers cancel an order request before an operator accepts it. Account orders require the owning session; guest cancellations require the order reference and matching mobile number. See the [Phase 16 customer order control](docs/PHASE_16.md).
+
+Phase 17 lets customers update profile details and download their account-linked order and support data. It preserves each order's original contact snapshot and does not claim that mobile numbers are verified. See the [Phase 17 customer data access](docs/PHASE_17.md).
 
 ## Run locally
 

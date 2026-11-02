@@ -1,10 +1,10 @@
 {
-  "name": "originalroot-farm-to-home",
-  "description": "A local farmer-to-home marketplace and harvest operations app.",
+  "name": "OriginalRoot-farm-to-home",
+  "description": "A farmer-to-home marketplace with transparent harvest and order records.",
   "author": "OriginalRoot",
   "private": true,
   "packageManager": "pnpm@11.25.0",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",

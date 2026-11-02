@@ -503,6 +503,50 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(200, {"customer": {key: customer[key] for key in ("id", "username", "full_name", "phone", "created_at")}})
             return
+        if path == "/api/customer/export":
+            customer = self._customer_session()
+            if customer is None:
+                self._send_json(401, {"detail": "Sign in to download your account data"})
+                return
+            with closing(connect_db()) as connection:
+                order_rows = connection.execute(
+                    """SELECT reference, listing_id, crop, category, farm_name, customer_name, customer_phone,
+                              community, quantity, unit, grower_payout, packing_cost, platform_fee, route_cost,
+                              total, status, created_at, updated_at, fulfillment_method, delivery_address
+                       FROM harvest_orders WHERE customer_id = ? ORDER BY created_at DESC""",
+                    (customer["id"],),
+                ).fetchall()
+                events = connection.execute(
+                    """SELECT e.order_reference, e.from_status, e.to_status, e.note, e.created_at
+                       FROM harvest_order_events e JOIN harvest_orders o ON o.reference = e.order_reference
+                       WHERE o.customer_id = ? ORDER BY e.id""",
+                    (customer["id"],),
+                ).fetchall()
+                tickets = connection.execute(
+                    """SELECT t.id, t.order_reference, t.category, t.subject, t.message, t.requested_resolution,
+                              t.status, t.resolution_note, t.created_at, t.updated_at
+                       FROM support_tickets t JOIN harvest_orders o ON o.reference = t.order_reference
+                       WHERE t.requester_type = 'customer' AND o.customer_id = ? ORDER BY t.created_at DESC""",
+                    (customer["id"],),
+                ).fetchall()
+                ticket_events = connection.execute(
+                    """SELECT e.ticket_id, e.from_status, e.to_status, e.note, e.created_at
+                       FROM support_ticket_events e JOIN support_tickets t ON t.id = e.ticket_id
+                       JOIN harvest_orders o ON o.reference = t.order_reference
+                       WHERE t.requester_type = 'customer' AND o.customer_id = ? ORDER BY e.id""",
+                    (customer["id"],),
+                ).fetchall()
+            order_events: dict[str, list[dict]] = {}
+            for event in events:
+                order_events.setdefault(event["order_reference"], []).append({key: event[key] for key in ("from_status", "to_status", "note", "created_at")})
+            support_history: dict[str, list[dict]] = {}
+            for event in ticket_events:
+                support_history.setdefault(event["ticket_id"], []).append({key: event[key] for key in ("from_status", "to_status", "note", "created_at")})
+            export_orders = [{**dict(row), "events": order_events.get(row["reference"], [])} for row in order_rows]
+            export_tickets = [{**dict(row), "events": support_history.get(row["id"], [])} for row in tickets]
+            now = datetime.now(timezone.utc).strftime("%Y%m%d")
+            self._send_json(200, {"exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "customer": {key: customer[key] for key in ("username", "full_name", "phone", "created_at")}, "orders": export_orders, "support_tickets": export_tickets}, {"Content-Disposition": f'attachment; filename="OriginalRoot-account-data-{now}.json"'})
+            return
         if path == "/api/customer/orders":
             customer = self._customer_session()
             if customer is None:
@@ -1079,6 +1123,26 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"detail": str(exc)})
                 return
             self._send_json(200, {"status": "password_changed", "message": "Password changed. Other sign-in sessions were closed."}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_customer_session")})
+            return
+        if request_path == "/api/customer/profile":
+            customer = self._customer_session()
+            if customer is None:
+                self._send_json(401, {"detail": "Sign in before updating your profile"})
+                return
+            try:
+                payload = self._read_json()
+                full_name = payload.get("full_name")
+                phone = payload.get("phone")
+                if not isinstance(full_name, str) or not 2 <= len(full_name.strip()) <= 80:
+                    raise ValueError("Name must be 2 to 80 characters")
+                if not isinstance(phone, str) or not re.fullmatch(r"[6-9][0-9]{9}", phone):
+                    raise ValueError("Enter a valid 10-digit Indian mobile number")
+                with closing(connect_db()) as connection, connection:
+                    connection.execute("UPDATE customers SET full_name = ?, phone = ? WHERE id = ?", (full_name.strip(), phone, customer["id"]))
+            except ValueError as exc:
+                self._send_json(400, {"detail": str(exc)})
+                return
+            self._send_json(200, {"customer": {"id": customer["id"], "username": customer["username"], "full_name": full_name.strip(), "phone": phone}, "message": "Profile updated. Existing orders keep their original contact details; this phone number is not SMS-verified."})
             return
         if request_path == "/api/customer/logout":
             cookie = SimpleCookie()

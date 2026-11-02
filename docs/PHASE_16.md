@@ -15,4 +15,4 @@ This is cancellation of an unaccepted request, before any payment is taken. It d
 
 ## Next phase
 
-Add customer profile and consent controls, verified account recovery, and an operator-ready first-run setup path. Then complete and rehearse the full grower-to-customer cycle with a real local supply group before expanding order volume.
+Phase 17 adds profile updates and a private account-data download. Verified recovery, an agreed retention/deletion policy, and a rehearsed first-run operator setup remain before expanding the rollout.
