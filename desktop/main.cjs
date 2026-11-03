@@ -16,19 +16,6 @@ let setupWatchTimer;
 const applicationDataRoot = app.getPath("appData");
 app.setPath("userData", path.join(applicationDataRoot, "OriginalRoot"));
 
-function migrateLegacyDataDirectory() {
-  const currentData = path.join(app.getPath("userData"), "data");
-  if (fs.existsSync(path.join(currentData, "originalroot.sqlite3")) || fs.existsSync(path.join(currentData, "OriginalRoot.sqlite3"))) return;
-
-  for (const previousName of ["OriginalRoot", "OriginalRoot-farm-to-home", "originalroot-farm-to-home"]) {
-    const previousData = path.join(applicationDataRoot, previousName, "data");
-    if (!fs.existsSync(previousData)) continue;
-    fs.mkdirSync(path.dirname(currentData), { recursive: true });
-    fs.cpSync(previousData, currentData, { recursive: true, force: false, errorOnExist: false });
-    return;
-  }
-}
-
 function writeStartupLog(message) {
   try {
     const directory = path.join(app.getPath("userData"), "data");
@@ -131,7 +118,6 @@ async function waitForApi(port) {
 }
 
 async function createWindow() {
-  migrateLegacyDataDirectory();
   bootstrapKey = getBootstrapKey();
   apiPort = await availablePort();
   startApi(apiPort);

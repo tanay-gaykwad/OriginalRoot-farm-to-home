@@ -12,7 +12,7 @@ OriginalRoot runs its API on a loopback-only address. The desktop app stores the
 %APPDATA%\OriginalRoot\data
 ```
 
-When upgrading from an earlier install, close the previous app and make a backup first. OriginalRoot copies the existing data folder and database into its new app-data folder on first launch; it leaves the previous folder in place until you confirm the new install has your records. Uninstalling OriginalRoot leaves its data folder in place. Back up the folder before uninstalling or moving to another computer.
+When upgrading, close the previous app and make a backup first. OriginalRoot keeps its data in the current Windows user's app-data folder. Uninstalling OriginalRoot leaves that folder in place. Back it up before uninstalling or moving to another computer.
 
 ## Back up and restore
 

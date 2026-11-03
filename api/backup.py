@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-DATA_PATH = Path(os.environ.get("ORIGINALROOT_DB_PATH") or os.environ.get("OriginalRoot_DB_PATH") or Path(__file__).resolve().parents[1] / ".data" / "originalroot.sqlite3")
+DATA_PATH = Path(os.environ.get("ORIGINALROOT_DB_PATH") or Path(__file__).resolve().parents[1] / ".data" / "originalroot.sqlite3")
 DATA_DIR = DATA_PATH.parent
 EVIDENCE_PATH = DATA_DIR / "evidence"
 BACKUP_DIR = DATA_DIR / "backups"
@@ -26,10 +26,8 @@ MAX_EVIDENCE_BYTES = 2_000_000
 MAX_DATABASE_BYTES = 2_000_000_000
 EVIDENCE_NAME = re.compile(r"EVD-[0-9A-F]{16}\.(?:jpg|png|webp)\Z")
 FORMAT_VERSION = "originalroot-data-bundle-v2"
-LEGACY_FORMAT_VERSION = "OriginalRoot-data-bundle-v1"
 DATABASE_MEMBER = "originalroot.sqlite3"
-LEGACY_DATABASE_MEMBER = "OriginalRoot.sqlite3"
-DATABASE_MEMBERS = {DATABASE_MEMBER, LEGACY_DATABASE_MEMBER}
+DATABASE_MEMBERS = {DATABASE_MEMBER}
 MEDIA_EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 
 
@@ -193,8 +191,6 @@ def _read_and_verify_to_database(archive_path: Path, database_output: Path) -> t
         format_version = manifest.get("format")
         if format_version == FORMAT_VERSION:
             database_member_name = DATABASE_MEMBER
-        elif format_version == LEGACY_FORMAT_VERSION:
-            database_member_name = LEGACY_DATABASE_MEMBER
         else:
             raise BackupError("Backup format is not supported")
         expected = {"manifest.json"}

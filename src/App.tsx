@@ -141,11 +141,9 @@ function MarketplaceApp() {
         return;
       }
       const storageKey = "originalroot-demand-signals";
-      const legacyStorageKey = "OriginalRoot-demand-signals";
-      const saved = JSON.parse(localStorage.getItem(storageKey) ?? localStorage.getItem(legacyStorageKey) ?? "[]") as typeof signal[];
+      const saved = JSON.parse(localStorage.getItem(storageKey) ?? "[]") as typeof signal[];
       saved.push(signal);
       localStorage.setItem(storageKey, JSON.stringify(saved));
-      localStorage.removeItem(legacyStorageKey);
       setDemandLocation("local");
     }
     setDemandSaved(true);

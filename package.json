@@ -4,7 +4,7 @@
   "author": "OriginalRoot",
   "private": true,
   "packageManager": "pnpm@11.25.0",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -29,7 +29,7 @@
   },
   "main": "desktop/main.cjs",
   "build": {
-    "appId": "com.OriginalRoot.farmtohome",
+    "appId": "com.originalroot.farmtohome",
     "productName": "OriginalRoot",
     "asar": true,
     "directories": {

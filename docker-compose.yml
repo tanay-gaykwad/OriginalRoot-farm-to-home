@@ -1,3 +1,5 @@
+name: originalroot
+
 services:
   originalroot:
     build: .
@@ -7,11 +9,11 @@ services:
       ORIGINALROOT_HOST: 0.0.0.0
       ORIGINALROOT_PORT: 8080
       ORIGINALROOT_DB_PATH: /data/originalroot.sqlite3
-      ORIGINALROOT_OPERATOR_TOKEN: ${ORIGINALROOT_OPERATOR_TOKEN:-${OriginalRoot_OPERATOR_TOKEN:-}}
-      ORIGINALROOT_DATA_GOV_IN_API_KEY: ${ORIGINALROOT_DATA_GOV_IN_API_KEY:-${OriginalRoot_DATA_GOV_IN_API_KEY:-}}
-      ORIGINALROOT_COOKIE_SECURE: ${ORIGINALROOT_COOKIE_SECURE:-${OriginalRoot_COOKIE_SECURE:-0}}
+      ORIGINALROOT_OPERATOR_TOKEN: ${ORIGINALROOT_OPERATOR_TOKEN:-}
+      ORIGINALROOT_DATA_GOV_IN_API_KEY: ${ORIGINALROOT_DATA_GOV_IN_API_KEY:-}
+      ORIGINALROOT_COOKIE_SECURE: ${ORIGINALROOT_COOKIE_SECURE:-0}
     volumes:
-      - OriginalRoot-data:/data
+      - originalroot-data:/data
     healthcheck:
       test:
         - CMD
@@ -25,5 +27,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  OriginalRoot-data:
+  originalroot-data:
+    name: ${ORIGINALROOT_DATA_VOLUME:-originalroot-data}
 

@@ -25,26 +25,23 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 
-def setting(name: str, legacy_name: str, default: str) -> str:
-    """Read current configuration first and accept older installations during rebranding."""
-    value = os.environ.get(name)
-    if value is None:
-        value = os.environ.get(legacy_name)
-    return default if value is None else value
+def setting(name: str, default: str) -> str:
+    """Read a named OriginalRoot configuration value or use its default."""
+    return os.environ.get(name, default)
 
 
-ROOT = Path(setting("ORIGINALROOT_ROOT", "OriginalRoot_ROOT", str(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))))
+ROOT = Path(setting("ORIGINALROOT_ROOT", str(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))))
 CATALOG_PATH = ROOT / "src" / "catalog.json"
 STATIC_PATH = ROOT / "dist"
-DATA_PATH = Path(setting("ORIGINALROOT_DB_PATH", "OriginalRoot_DB_PATH", str(ROOT / ".data" / "originalroot.sqlite3")))
+DATA_PATH = Path(setting("ORIGINALROOT_DB_PATH", str(ROOT / ".data" / "originalroot.sqlite3")))
 EVIDENCE_PATH = DATA_PATH.parent / "evidence"
 ROUTE_FEE = 24
 MAX_BODY_BYTES = 16_384
 MAX_EVIDENCE_BYTES = 2_000_000
 MAX_EVIDENCE_REQUEST_BYTES = 2_750_000
 EVIDENCE_MEDIA_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
-OPERATOR_TOKEN = setting("ORIGINALROOT_OPERATOR_TOKEN", "OriginalRoot_OPERATOR_TOKEN", "")
-DATA_GOV_IN_API_KEY = setting("ORIGINALROOT_DATA_GOV_IN_API_KEY", "OriginalRoot_DATA_GOV_IN_API_KEY", "").strip()
+OPERATOR_TOKEN = setting("ORIGINALROOT_OPERATOR_TOKEN", "")
+DATA_GOV_IN_API_KEY = setting("ORIGINALROOT_DATA_GOV_IN_API_KEY", "").strip()
 MANDI_RESOURCE_ID = "9ef84268-d588-465a-a308-a864a43d0070"
 COMMUNITIES = {"Mysuru", "Mandya", "Srirangapatna"}
 PRODUCT_CATEGORIES = {"fresh", "staples"}
@@ -68,34 +65,6 @@ def load_catalog() -> list[dict]:
 
 CATALOG = load_catalog()
 PRODUCTS = {item["id"]: item for item in CATALOG}
-
-
-def migrate_legacy_database() -> None:
-    """Copy an older database once, using SQLite's online backup API for WAL safety."""
-    legacy_path = DATA_PATH.with_name("OriginalRoot.sqlite3")
-    if DATA_PATH.exists() or not legacy_path.is_file():
-        return
-
-    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    source = None
-    destination = None
-    try:
-        source = sqlite3.connect(f"{legacy_path.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
-        destination = sqlite3.connect(DATA_PATH, timeout=5)
-        source.backup(destination)
-        destination.close()
-        destination = None
-        DATA_PATH.chmod(0o600)
-    except Exception:
-        if destination is not None:
-            destination.close()
-        DATA_PATH.unlink(missing_ok=True)
-        Path(f"{DATA_PATH}-wal").unlink(missing_ok=True)
-        Path(f"{DATA_PATH}-shm").unlink(missing_ok=True)
-        raise
-    finally:
-        if source is not None:
-            source.close()
 
 
 def connect_db() -> sqlite3.Connection:
@@ -445,7 +414,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         cookie = SimpleCookie()
         try:
             cookie.load(self.headers.get("Cookie", ""))
-            morsel = cookie.get("OriginalRoot_operator_session")
+            morsel = cookie.get("originalroot_operator_session")
             if morsel is None:
                 return None
             token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
@@ -486,7 +455,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         cookie = SimpleCookie()
         try:
             cookie.load(self.headers.get("Cookie", ""))
-            morsel = cookie.get("OriginalRoot_session")
+            morsel = cookie.get("originalroot_session")
             if morsel is None:
                 return None
             token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
@@ -505,7 +474,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
         cookie = SimpleCookie()
         try:
             cookie.load(self.headers.get("Cookie", ""))
-            morsel = cookie.get("OriginalRoot_customer_session")
+            morsel = cookie.get("originalroot_customer_session")
             if morsel is None:
                 return None
             token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
@@ -521,8 +490,8 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             return None
 
     @staticmethod
-    def _session_cookie(token: str, *, clear: bool = False, cookie_name: str = "OriginalRoot_session") -> str:
-        secure = "; Secure" if setting("ORIGINALROOT_COOKIE_SECURE", "OriginalRoot_COOKIE_SECURE", "0") == "1" else ""
+    def _session_cookie(token: str, *, clear: bool = False, cookie_name: str = "originalroot_session") -> str:
+        secure = "; Secure" if setting("ORIGINALROOT_COOKIE_SECURE", "0") == "1" else ""
         if clear:
             return f"{cookie_name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict{secure}"
         return f"{cookie_name}={token}; Path=/; Max-Age=604800; HttpOnly; SameSite=Strict{secure}"
@@ -1043,7 +1012,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
                 return
-            self._send_json(201, {"operator": {"id": operator_id, "username": username, "full_name": full_name.strip(), "role": "owner"}}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_operator_session")})
+            self._send_json(201, {"operator": {"id": operator_id, "username": username, "full_name": full_name.strip(), "role": "owner"}}, {"Set-Cookie": self._session_cookie(token, cookie_name="originalroot_operator_session")})
             return
         if request_path == "/api/operator/login":
             if self._auth_is_locked("operator"):
@@ -1070,20 +1039,20 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
                 return
-            self._send_json(200, {"operator": {key: operator[key] for key in ("id", "username", "full_name", "role")}}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_operator_session")})
+            self._send_json(200, {"operator": {key: operator[key] for key in ("id", "username", "full_name", "role")}}, {"Set-Cookie": self._session_cookie(token, cookie_name="originalroot_operator_session")})
             return
         if request_path == "/api/operator/logout":
             cookie = SimpleCookie()
             try:
                 cookie.load(self.headers.get("Cookie", ""))
-                morsel = cookie.get("OriginalRoot_operator_session")
+                morsel = cookie.get("originalroot_operator_session")
                 if morsel:
                     token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
                     with closing(connect_db()) as connection, connection:
                         connection.execute("DELETE FROM operator_sessions WHERE token_hash = ?", (token_hash,))
             except (sqlite3.Error, ValueError):
                 pass
-            self._send_json(200, {"status": "signed_out"}, {"Set-Cookie": self._session_cookie("", clear=True, cookie_name="OriginalRoot_operator_session")})
+            self._send_json(200, {"status": "signed_out"}, {"Set-Cookie": self._session_cookie("", clear=True, cookie_name="originalroot_operator_session")})
             return
         if request_path == "/api/operator/password":
             if not self._operator_authorized():
@@ -1116,7 +1085,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
                 return
-            self._send_json(200, {"status": "password_changed"}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_operator_session")})
+            self._send_json(200, {"status": "password_changed"}, {"Set-Cookie": self._session_cookie(token, cookie_name="originalroot_operator_session")})
             return
         if request_path == "/api/operator/users":
             if not self._operator_authorized() or not self._operator_is_owner():
@@ -1227,7 +1196,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
                 return
-            self._send_json(201, {"customer": {"id": customer_id, "username": username, "full_name": full_name.strip(), "phone": phone}}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_customer_session")})
+            self._send_json(201, {"customer": {"id": customer_id, "username": username, "full_name": full_name.strip(), "phone": phone}}, {"Set-Cookie": self._session_cookie(token, cookie_name="originalroot_customer_session")})
             return
         if request_path == "/api/customer/login":
             try:
@@ -1264,7 +1233,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
                 return
-            self._send_json(200, {"customer": {key: account[key] for key in ("id", "username", "full_name", "phone")}}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_customer_session")})
+            self._send_json(200, {"customer": {key: account[key] for key in ("id", "username", "full_name", "phone")}}, {"Set-Cookie": self._session_cookie(token, cookie_name="originalroot_customer_session")})
             return
         if request_path == "/api/customer/password":
             customer = self._customer_session()
@@ -1297,7 +1266,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_json(400, {"detail": str(exc)})
                 return
-            self._send_json(200, {"status": "password_changed", "message": "Password changed. Other sign-in sessions were closed."}, {"Set-Cookie": self._session_cookie(token, cookie_name="OriginalRoot_customer_session")})
+            self._send_json(200, {"status": "password_changed", "message": "Password changed. Other sign-in sessions were closed."}, {"Set-Cookie": self._session_cookie(token, cookie_name="originalroot_customer_session")})
             return
         if request_path == "/api/customer/profile":
             customer = self._customer_session()
@@ -1323,14 +1292,14 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             cookie = SimpleCookie()
             try:
                 cookie.load(self.headers.get("Cookie", ""))
-                morsel = cookie.get("OriginalRoot_customer_session")
+                morsel = cookie.get("originalroot_customer_session")
                 if morsel:
                     token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
                     with closing(connect_db()) as connection, connection:
                         connection.execute("DELETE FROM customer_sessions WHERE token_hash = ?", (token_hash,))
             except (sqlite3.Error, ValueError):
                 pass
-            self._send_json(200, {"status": "signed_out"}, {"Set-Cookie": self._session_cookie("", clear=True, cookie_name="OriginalRoot_customer_session")})
+            self._send_json(200, {"status": "signed_out"}, {"Set-Cookie": self._session_cookie("", clear=True, cookie_name="originalroot_customer_session")})
             return
         if request_path == "/api/orders/track":
             try:
@@ -1448,7 +1417,7 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
             cookie = SimpleCookie()
             try:
                 cookie.load(self.headers.get("Cookie", ""))
-                morsel = cookie.get("OriginalRoot_session")
+                morsel = cookie.get("originalroot_session")
                 if morsel:
                     token_hash = hashlib.sha256(morsel.value.encode("utf-8")).hexdigest()
                     with closing(connect_db()) as connection, connection:
@@ -2129,9 +2098,8 @@ class OriginalRootHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     os.umask(0o077)
-    host = setting("ORIGINALROOT_HOST", "OriginalRoot_HOST", "127.0.0.1")
-    port = int(setting("ORIGINALROOT_PORT", "OriginalRoot_PORT", "8080"))
-    migrate_legacy_database()
+    host = setting("ORIGINALROOT_HOST", "127.0.0.1")
+    port = int(setting("ORIGINALROOT_PORT", "8080"))
     with closing(connect_db()):
         pass
     print(f"OriginalRoot local API listening on http://{host}:{port} (online payments disabled)")
